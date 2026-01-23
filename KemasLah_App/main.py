@@ -1,10 +1,11 @@
 import sys
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QStackedWidget
-from widgets.sidebar import Sidebar
-from views.file_browser_view import FileBrowserView
-from views.archive_view import ArchiveView
-from views.home_view import HomeView
-from views.statistics_view import StatisticsView
+from PyQt6.QtCharts import QChart, QChartView, QPieSeries
+from src.gui.widgets.sidebar import Sidebar
+from src.gui.views.file_browser_view import FileBrowserView
+from src.gui.views.archive_view import ArchiveView
+from src.gui.views.home_view import HomeView
+from src.gui.views.statistics_view import StatisticsView
 
 
 class SmartFileManager(QMainWindow):
