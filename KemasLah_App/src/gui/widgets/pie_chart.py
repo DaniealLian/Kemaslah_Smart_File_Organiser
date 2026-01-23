@@ -56,4 +56,7 @@ class PieChartWidget(QWidget):
             legend_item.addStretch()
             
             legend_layout.addLayout(legend_item)
-        pass
+        
+        layout.addLayout(legend_layout)
+        
+        self.setLayout(layout)
