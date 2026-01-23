@@ -57,4 +57,5 @@ class ActionBar(QWidget):
                 }
             """)
             layout.addWidget(smart_btn)
-        pass
+
+        self.setLayout(layout)

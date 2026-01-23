@@ -93,3 +93,10 @@ class StatisticsView(QWidget):
         
         stats_column.addWidget(total_card)
         stats_column.addWidget(archive_card)
+        stats_column.addWidget(usage_card) # Ensure usage card is added
+
+        top_row.addLayout(stats_column, 1)
+
+        layout.addLayout(top_row)
+
+        self.setLayout(layout)

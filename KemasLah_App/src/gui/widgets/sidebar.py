@@ -68,7 +68,6 @@ class Sidebar(QWidget):
         nav_items = [
             ("Home", "home"),
             ("All Files", "files"),
-            ("Documents", "documents"),
             ("Auto Archive", "archive"),
             ("File Sharing", "sharing"),
             ("Statistics", "statistics"),

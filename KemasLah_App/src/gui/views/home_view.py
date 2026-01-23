@@ -5,9 +5,7 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtCore import Qt
 
 # Keep your other widgets
-from ..widgets.topbar import TopBar
 from ..widgets.stat_card import StatCard
-from ..widgets.actionbar import ActionBar
 
 class HomeView(QWidget):
     def __init__(self):
@@ -18,10 +16,6 @@ class HomeView(QWidget):
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        
-        # 1. Top Bar & Action Bar
-        layout.addWidget(TopBar())
-        layout.addWidget(ActionBar(True, "Smart Organise"))
         
         # 2. Stats Cards
         stats_layout = QHBoxLayout()

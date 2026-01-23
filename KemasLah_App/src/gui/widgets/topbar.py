@@ -3,7 +3,6 @@ from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QLineEdit
 from PyQt6.QtCore import pyqtSignal, QDir
 
 class TopBar(QWidget):
-    # Signal: When a breadcrumb button is clicked, tell the main view to go there
     path_changed = pyqtSignal(str)
 
     def __init__(self, parent=None):
@@ -12,14 +11,14 @@ class TopBar(QWidget):
         self.init_ui()
         
     def init_ui(self):
+        # (Your existing init_ui code is fine, keep it exactly as is)
         layout = QHBoxLayout()
         layout.setContentsMargins(20, 15, 20, 15)
         
-        # Breadcrumb Container
         self.breadcrumb_layout = QHBoxLayout()
         self.breadcrumb_layout.setSpacing(5)
         
-        # Search bar (Keep existing style)
+        # Search bar setup...
         search_widget = QWidget()
         search_layout = QHBoxLayout()
         search_layout.setContentsMargins(0, 0, 0, 0)
@@ -51,50 +50,66 @@ class TopBar(QWidget):
         self.setLayout(layout)
 
     def update_breadcrumbs(self, path):
-        """Rebuilds the breadcrumb buttons based on the current path"""
         self.current_path = path
         
-        # Clear old buttons
+        # 1. Clear old buttons
         while self.breadcrumb_layout.count():
             child = self.breadcrumb_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
 
-        # Normalize path for splitting
+        # 2. Handle Special Pages (Home, Settings, etc.)
+        if path in ["Home", "Smart Archive", "Settings"] or not os.path.isabs(path):
+            self.add_crumb_label(path)
+            return
+
+        # 3. Handle Real File Paths (e.g., C:/Users/Docs)
         path = os.path.normpath(path)
         parts = path.split(os.sep)
-
-        # Reconstruct path step-by-step for the buttons
-        reconstructed_path = parts[0] # Drive letter (e.g., C:)
         
-        # Create Home/Drive Button
-        self.add_crumb_button("🏠", reconstructed_path)
-
-        # Loop through the rest of the folders
-        for part in parts[1:]:
-            if not part: continue # Skip empty splits
-            reconstructed_path = os.path.join(reconstructed_path, part)
+        current_build_path = ""
+        
+        for i, part in enumerate(parts):
+            if not part: continue # skip empty
             
-            # Add Separator
-            sep = QLabel(">")
-            sep.setStyleSheet("color: #888888;")
-            self.breadcrumb_layout.addWidget(sep)
+            # Windows drive fix (e.g., "C:") needs a slash to be valid
+            if i == 0 and ':' in part:
+                current_build_path = part + os.sep
+            else:
+                current_build_path = os.path.join(current_build_path, part)
             
-            # Add Folder Button
-            self.add_crumb_button(part, reconstructed_path)
+            # Add Button
+            self.add_crumb_button(part, current_build_path)
+            
+            # Add Separator ">" (except for the last item)
+            if i < len(parts) - 1:
+                sep = QLabel(">")
+                sep.setStyleSheet("color: #666666; font-weight: bold;")
+                self.breadcrumb_layout.addWidget(sep)
 
-    def add_crumb_button(self, text, path_data):
-        """Helper to create a styled breadcrumb button"""
+    def add_crumb_button(self, text, full_path):
         btn = QPushButton(text)
+        # Store the path properly so the lambda captures the specific path for this button
+        btn.clicked.connect(lambda checked, p=full_path: self.path_changed.emit(p))
+        
         btn.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
                 color: #C0C0C0;
                 border: none;
                 font-weight: bold;
+                padding: 2px 5px;
             }
-            QPushButton:hover { color: #4A9EFF; text-decoration: underline; }
+            QPushButton:hover {
+                color: #4A9EFF;
+                background-color: #2D3748;
+                border-radius: 4px;
+            }
         """)
-        # Connect click to signal
-        btn.clicked.connect(lambda: self.path_changed.emit(path_data))
         self.breadcrumb_layout.addWidget(btn)
+
+    def add_crumb_label(self, text):
+        """Used for static pages like Home where you can't click back"""
+        label = QLabel(text)
+        label.setStyleSheet("color: #C0C0C0; font-weight: bold; font-size: 14px; padding-left: 5px;")
+        self.breadcrumb_layout.addWidget(label)
