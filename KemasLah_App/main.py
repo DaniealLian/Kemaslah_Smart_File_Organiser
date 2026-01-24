@@ -42,6 +42,8 @@ class SmartFileManager(QMainWindow):
         right_layout.addWidget(self.top_bar)
         
         self.action_bar = ActionBar(True, "Smart Organise")
+        self.action_bar.action_clicked.connect(self.handle_action_bar)
+        self.action_bar.smart_organise_clicked.connect(self.handle_smart_organise)
         right_layout.addWidget(self.action_bar)
         # ---------------------
         
@@ -66,6 +68,24 @@ class SmartFileManager(QMainWindow):
         # Add the right panel to the main layout
         main_layout.addWidget(right_panel)
 
+    def handle_action_bar(self, action_name):
+        """Passes the action to the currently active view"""
+        current_widget = self.stack.currentWidget()
+        
+        # We only want these buttons to work if we are in the File Browser
+        if current_widget == self.files_view:
+            # We access the table directly or via a wrapper method
+            self.files_view.file_table.perform_action(action_name)
+
+    def handle_smart_organise(self):
+        """Placeholder for Smart Organise Logic"""
+        current_widget = self.stack.currentWidget()
+        if current_widget == self.files_view:
+             # Just a basic demo of functionality
+             from PyQt6.QtWidgets import QMessageBox
+             QMessageBox.information(self, "Smart Organise", 
+                 "This feature would now scan and sort files.\n(Functionality connected successfully!)")
+             
     def switch_view(self, identifier):
         if identifier == "home":
             self.stack.setCurrentWidget(self.home_view)
