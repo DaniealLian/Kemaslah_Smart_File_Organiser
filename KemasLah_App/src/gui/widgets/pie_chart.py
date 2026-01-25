@@ -1,10 +1,13 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
-from PyQt6.QtCharts import QChart, QChartView, QPieSeries
-from PyQt6.QtGui import QColor, QPainter
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSizePolicy
+from PyQt6.QtCharts import QChart, QChartView, QPieSeries, QPieSlice
+from PyQt6.QtGui import QColor, QPainter, QFont
+from PyQt6.QtCore import QMargins  # Ensure this is imported
 
 class PieChartWidget(QWidget):
     def __init__(self, title, data):
         super().__init__()
+        # 1. Force a large height so charts are identical and big
+        self.setMinimumHeight(500)
         self.init_ui(title, data)
         
     def init_ui(self, title, data):
@@ -17,23 +20,41 @@ class PieChartWidget(QWidget):
         
         # Create pie chart
         series = QPieSeries()
+        # 2. Reduce pie size slightly (0.7) to give labels more room to float outside
+        series.setPieSize(0.7) 
+        
         colors = ["#D946EF", "#06B6D4", "#22D3EE", "#8B5CF6"]
         
         for i, (label, value) in enumerate(data):
-            slice = series.append(label, value)
-            slice.setColor(QColor(colors[i % len(colors)]))
-            slice.setLabelVisible(True)
-            slice.setLabel(f"{int(value)}%")
+            slice_item = series.append(label, value)
+            slice_item.setColor(QColor(colors[i % len(colors)]))
+
+            # 3. Label Settings
+            slice_item.setLabelVisible(True)
+            slice_item.setLabel(f"{int(value)}%")
+            slice_item.setLabelBrush(QColor("white"))
+            
+            # Make text bold/larger
+            f = QFont("Arial", 10)
+            f.setBold(True)
+            slice_item.setLabelFont(f)
+            
+            # Force labels outside
+            slice_item.setLabelPosition(QPieSlice.LabelPosition.LabelOutside)
         
         chart = QChart()
         chart.addSeries(series)
         chart.setAnimationOptions(QChart.AnimationOption.SeriesAnimations)
         chart.setBackgroundBrush(QColor("#2D3748"))
+        
+        # 4. Remove whitespace margins
+        chart.setMargins(QMargins(0, 0, 0, 0))
         chart.legend().setVisible(False)
         
         chart_view = QChartView(chart)
         chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
         chart_view.setStyleSheet("background-color: transparent; border: none;")
+        chart_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
         layout.addWidget(chart_view)
         
@@ -58,5 +79,4 @@ class PieChartWidget(QWidget):
             legend_layout.addLayout(legend_item)
         
         layout.addLayout(legend_layout)
-        
         self.setLayout(layout)
