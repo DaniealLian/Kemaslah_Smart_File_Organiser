@@ -11,7 +11,6 @@ class TopBar(QWidget):
         self.init_ui()
         
     def init_ui(self):
-        # (Your existing init_ui code is fine, keep it exactly as is)
         layout = QHBoxLayout()
         layout.setContentsMargins(20, 15, 20, 15)
         
@@ -59,7 +58,7 @@ class TopBar(QWidget):
                 child.widget().deleteLater()
 
         # 2. Handle Special Pages (Home, Settings, etc.)
-        if path in ["Home", "Smart Archive", "Settings"] or not os.path.isabs(path):
+        if path in ["Home", "Smart Archive", "Settings", "Statistics"] or not os.path.isabs(path):
             self.add_crumb_label(path)
             return
 
@@ -67,25 +66,56 @@ class TopBar(QWidget):
         path = os.path.normpath(path)
         parts = path.split(os.sep)
         
+        # Filter out empty parts
+        parts = [p for p in parts if p]
+        
+        # Smart truncation: Show only last 3 segments if path is too long
+        MAX_SEGMENTS = 3
+        show_ellipsis = len(parts) > MAX_SEGMENTS
+        
+        if show_ellipsis:
+            # Keep the first part (drive) and last 2 parts
+            visible_parts = [parts[0]] + parts[-(MAX_SEGMENTS-1):]
+            full_parts = parts  # Keep full path for building correct paths
+        else:
+            visible_parts = parts
+            full_parts = parts
+        
         current_build_path = ""
         
-        for i, part in enumerate(parts):
-            if not part: continue # skip empty
-            
+        for i, part in enumerate(full_parts):
             # Windows drive fix (e.g., "C:") needs a slash to be valid
             if i == 0 and ':' in part:
                 current_build_path = part + os.sep
             else:
                 current_build_path = os.path.join(current_build_path, part)
             
-            # Add Button
-            self.add_crumb_button(part, current_build_path)
+            # Only show certain breadcrumbs based on truncation
+            should_show = False
             
-            # Add Separator ">" (except for the last item)
-            if i < len(parts) - 1:
-                sep = QLabel(">")
-                sep.setStyleSheet("color: #666666; font-weight: bold;")
-                self.breadcrumb_layout.addWidget(sep)
+            if show_ellipsis:
+                # Show first segment (drive)
+                if i == 0:
+                    should_show = True
+                # Show ellipsis after drive
+                elif i == 1:
+                    self.add_ellipsis()
+                # Show last (MAX_SEGMENTS - 1) segments
+                elif i >= len(full_parts) - (MAX_SEGMENTS - 1):
+                    should_show = True
+            else:
+                # Show all segments if not truncated
+                should_show = True
+            
+            if should_show:
+                # Add Button
+                self.add_crumb_button(part, current_build_path)
+                
+                # Add Separator ">" (except for the last item)
+                if i < len(full_parts) - 1:
+                    sep = QLabel(">")
+                    sep.setStyleSheet("color: #666666; font-weight: bold;")
+                    self.breadcrumb_layout.addWidget(sep)
 
     def add_crumb_button(self, text, full_path):
         btn = QPushButton(text)
@@ -113,3 +143,9 @@ class TopBar(QWidget):
         label = QLabel(text)
         label.setStyleSheet("color: #C0C0C0; font-weight: bold; font-size: 14px; padding-left: 5px;")
         self.breadcrumb_layout.addWidget(label)
+    
+    def add_ellipsis(self):
+        """Add an ellipsis (...) to indicate hidden path segments"""
+        ellipsis = QLabel("...")
+        ellipsis.setStyleSheet("color: #666666; font-weight: bold; padding: 0 5px;")
+        self.breadcrumb_layout.addWidget(ellipsis)

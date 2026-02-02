@@ -119,3 +119,11 @@ class Sidebar(QWidget):
         # Emit signal with identifier
         identifier = button.property("identifier")
         self.navigation_changed.emit(identifier)
+    
+    def set_active_by_identifier(self, identifier):
+        """Programmatically set which navigation button is active"""
+        for btn in self.nav_buttons:
+            if btn.property("identifier") == identifier:
+                btn.setChecked(True)
+            else:
+                btn.setChecked(False)

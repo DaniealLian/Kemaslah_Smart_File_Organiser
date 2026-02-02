@@ -1,16 +1,20 @@
 import os
 import shutil
 import datetime
+import subprocess
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QTableWidget, QTableWidgetItem, QHeaderView, 
                              QAbstractItemView, QStackedWidget)
 from PyQt6.QtGui import QColor
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 
 # Import your custom widgets
 from ..widgets.stat_card import StatCard
 
 class HomeView(QWidget):
+    # Signal to navigate to All Files page and optionally open a specific path
+    navigate_to_path = pyqtSignal(str)
+    
     def __init__(self):
         super().__init__()
         self.tab_buttons = {} # Store buttons to update styles
@@ -129,6 +133,28 @@ class HomeView(QWidget):
         except:
             return (500, 250, 250)
 
+    def resolve_shortcut(self, lnk_path):
+        """Resolve a .lnk shortcut to its target using PowerShell"""
+        try:
+            # Use PowerShell to resolve the shortcut
+            ps_command = f'(New-Object -ComObject WScript.Shell).CreateShortcut("{lnk_path}").TargetPath'
+            result = subprocess.run(
+                ['powershell', '-Command', ps_command],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                creationflags=subprocess.CREATE_NO_WINDOW  # Don't show PowerShell window
+            )
+            
+            if result.returncode == 0:
+                target_path = result.stdout.strip()
+                if target_path and os.path.exists(target_path):
+                    return target_path
+        except Exception as e:
+            print(f"Failed to resolve shortcut: {e}")
+        
+        return None
+
     def get_windows_recent_files(self):
         # Scans %APPDATA%/Microsoft/Windows/Recent
         path = os.path.expandvars(r'%APPDATA%\Microsoft\Windows\Recent')
@@ -143,6 +169,7 @@ class HomeView(QWidget):
 
     def get_shared_files(self):
         # Scans C:/Users/Public/Documents
+        # Place holder can delete when the actual share feature is implemented 
         path = r'C:\Users\Public\Documents'
         return self.scan_folder_for_table(path)
 
@@ -179,7 +206,22 @@ class HomeView(QWidget):
                 if '.' in name:
                     ext = name.split('.')[-1].upper()
                 
-                files_data.append((name, date_str, ext, entry.path))
+                # Store both display name and full path
+                # Also determine if this is a directory (for .lnk shortcuts, we need to resolve)
+                is_folder = entry.is_dir()
+                target_path = entry.path
+                
+                # Try to resolve .lnk shortcuts to get the actual target
+                if entry.name.lower().endswith('.lnk'):
+                    resolved_path = self.resolve_shortcut(entry.path)
+                    if resolved_path:
+                        target_path = resolved_path
+                        is_folder = os.path.isdir(target_path)
+                        print(f"DEBUG: Resolved '{name}' -> '{target_path}', is_folder={is_folder}")
+                    else:
+                        print(f"DEBUG: Could not resolve '{name}'")
+                
+                files_data.append((name, date_str, ext, target_path, is_folder))
                 
         except Exception as e:
             print(f"Error scanning {folder_path}: {e}")
@@ -217,9 +259,10 @@ class HomeView(QWidget):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         table.setColumnWidth(2, 100)
 
-        for row, (name, date_str, file_type, full_path) in enumerate(data):
+        for row, (name, date_str, file_type, full_path, is_folder) in enumerate(data):
             item_name = QTableWidgetItem(name)
             item_name.setData(Qt.ItemDataRole.UserRole, full_path)
+            item_name.setData(Qt.ItemDataRole.UserRole + 1, is_folder)  # Store if it's a folder
             item_name.setForeground(QColor("white"))
             table.setItem(row, 0, item_name)
             
@@ -238,13 +281,27 @@ class HomeView(QWidget):
     def open_item(self, row, col):
         # Determine which table sent the signal
         sender = self.sender() 
-        if not sender: return
+        if not sender: 
+            print("DEBUG: No sender!")
+            return
         
         item = sender.item(row, 0)
         path = item.data(Qt.ItemDataRole.UserRole)
+        is_folder = item.data(Qt.ItemDataRole.UserRole + 1)
+        
+        print(f"DEBUG: open_item called - path='{path}', is_folder={is_folder}")
         
         if path and os.path.exists(path):
-            try:
-                os.startfile(path)
-            except Exception as e:
-                print(f"Could not open file: {e}")
+            if is_folder:
+                # Navigate to All Files page with this folder
+                print(f"DEBUG: Emitting navigate_to_path signal with path: {path}")
+                self.navigate_to_path.emit(path)
+            else:
+                # For files, open them with the default application
+                print(f"DEBUG: Opening file with os.startfile: {path}")
+                try:
+                    os.startfile(path)
+                except Exception as e:
+                    print(f"Could not open file: {e}")
+        else:
+            print(f"DEBUG: Path doesn't exist or is None: {path}")

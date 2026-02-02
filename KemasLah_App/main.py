@@ -58,6 +58,9 @@ class SmartFileManager(QMainWindow):
         # Connect the File Browser to update the Top Bar
         self.files_view.path_changed.connect(self.top_bar.update_breadcrumbs)
         
+        # Connect Home View navigation to switch to Files view and open folder
+        self.home_view.navigate_to_path.connect(self.navigate_to_folder_from_home)
+        
         self.stack.addWidget(self.home_view)    # Index 0
         self.stack.addWidget(self.files_view)   # Index 1
         self.stack.addWidget(self.archive_view) # Index 2
@@ -85,6 +88,19 @@ class SmartFileManager(QMainWindow):
              from PyQt6.QtWidgets import QMessageBox
              QMessageBox.information(self, "Smart Organise", 
                  "This feature would now scan and sort files.\n(Functionality connected successfully!)")
+    
+    def navigate_to_folder_from_home(self, folder_path):
+        """Navigate from Home view to Files view with a specific folder"""
+        # Switch to the Files view
+        self.stack.setCurrentWidget(self.files_view)
+        
+        # Update the sidebar to highlight "All Files"
+        self.sidebar.set_active_by_identifier("files")
+        
+        # Navigate to the folder
+        self.files_view.navigate_to(folder_path)
+        
+        # Breadcrumbs will update automatically via the path_changed signal
              
     def switch_view(self, identifier):
         if identifier == "home":
