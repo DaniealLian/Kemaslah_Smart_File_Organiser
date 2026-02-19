@@ -16,10 +16,25 @@ class CircularImage(QLabel):
 class Sidebar(QWidget):
     # Signal to communicate with main window
     navigation_changed = pyqtSignal(str)
+    logout_requested = pyqtSignal()  # ADDED this
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, user_data=None):
         super().__init__(parent)
+        self.user_data = user_data or {}
         self.init_ui()
+
+    def set_user_data(self, user_data):
+        """Update sidebar with user information"""
+        self.user_data = user_data
+        
+        # Update profile display
+        display_name = user_data.get('display_name') or user_data.get('username', 'User')
+        email = user_data.get('email', '')
+        initials = user_data.get('initials', 'U')
+
+        # Actually update the visible labels
+        self.title_label.setText(display_name)
+        self.desc_label.setText(email)
         
     def init_ui(self):
         layout = QVBoxLayout()
@@ -31,17 +46,22 @@ class Sidebar(QWidget):
         profile_layout = QHBoxLayout()
         profile_layout.setContentsMargins(20, 10, 20, 20)
         
-        profile_pic = CircularImage(40)
-        profile_layout.addWidget(profile_pic)
+        self.profile_pic = CircularImage(40)
+        # If you want to show initials:
+        # self.profile_pic.setText(self.user_data.get('initials', 'U'))
+        profile_layout.addWidget(self.profile_pic)
         
         profile_info = QVBoxLayout()
         profile_info.setSpacing(2)
-        title_label = QLabel("Title")
-        title_label.setStyleSheet("color: #E0E0E0; font-size: 14px; font-weight: bold;")
-        desc_label = QLabel("Description")
-        desc_label.setStyleSheet("color: #888888; font-size: 11px;")
-        profile_info.addWidget(title_label)
-        profile_info.addWidget(desc_label)
+        
+        self.title_label = QLabel(self.user_data.get('display_name', 'User'))
+        self.title_label.setStyleSheet("color: #E0E0E0; font-size: 14px; font-weight: bold;")
+        
+        self.desc_label = QLabel(self.user_data.get('email', 'user@example.com'))
+        self.desc_label.setStyleSheet("color: #888888; font-size: 11px;")
+        
+        profile_info.addWidget(self.title_label)
+        profile_info.addWidget(self.desc_label)
         profile_layout.addLayout(profile_info)
         
         # Sign out icon
@@ -58,6 +78,7 @@ class Sidebar(QWidget):
                 background-color: rgba(255, 68, 68, 0.1);
             }
         """)
+        signout_btn.clicked.connect(self.logout_requested.emit)  # CONNECT THIS
         profile_layout.addWidget(signout_btn)
         
         profile_widget.setLayout(profile_layout)
