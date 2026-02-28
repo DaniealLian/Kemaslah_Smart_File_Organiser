@@ -74,10 +74,11 @@ class SmartFileManager(QMainWindow):
         self.files_view = FileBrowserView()
         self.archive_view = ArchiveView()
         self.statistics_view = StatisticsView()
-        # Settings will use auth window's UserProfilePage (index 3)
         
         # Connect the File Browser to update the Top Bar
         self.files_view.path_changed.connect(self.top_bar.update_breadcrumbs)
+        # Listens for folder clicks
+        self.home_view.folder_opened.connect(self.on_home_folder_opened)
         
         self.stack.addWidget(self.home_view)        # Index 0
         self.stack.addWidget(self.files_view)       # Index 1
@@ -168,6 +169,15 @@ class SmartFileManager(QMainWindow):
         if self.settings_overlay and self.settings_overlay.isVisible():
             self.settings_overlay.resize(self.size())
         super().resizeEvent(event)
+    
+    def on_home_folder_opened(self, path):
+        """Triggered when a user double-clicks a folder in the Home tab tables"""
+        # 1. Tell the File Browser to load the specific folder path
+        self.files_view.navigate_to(path)
+        
+        # 2. Switch the UI stack to show the files view
+        self.switch_view("files")
+        self.sidebar.set_active("files")
 
 
 class KemaslahApp(QMainWindow):
@@ -201,8 +211,7 @@ class KemaslahApp(QMainWindow):
             print("WARNING: login_successful signal not found in LoginPage!")
             print("Make sure you've added the signal to auth/authentication_page.py")
         
-        # FIXED: Add "Skip Login" functionality
-        # Check if login page has a skip button and connect it
+        #Skip login become guest
         if hasattr(login_page, 'skip_login_clicked'):
             login_page.skip_login_clicked.connect(self.on_skip_login)
         
@@ -213,9 +222,7 @@ class KemaslahApp(QMainWindow):
         """Called when user successfully logs in"""
         print(f"Login successful for: {user_data.get('email')}")
         
-        # Always destroy any existing file_manager (could be stale guest or previous user).
-        # This guarantees the sidebar, settings overlay, and all user-facing widgets
-        # are rebuilt fresh with the new user's data every time.
+        #This is to refresh the data so that no previous user data is displayed after logout
         if self.file_manager is not None:
             self.stack.removeWidget(self.file_manager)
             self.file_manager.deleteLater()
@@ -254,7 +261,6 @@ class KemaslahApp(QMainWindow):
         # Switch to file manager
         self.stack.setCurrentWidget(self.file_manager)
         
-        # FIXED: Make sure home view is selected
         self.file_manager.switch_view("home")
         
         # Resize window for file manager
@@ -286,8 +292,8 @@ class KemaslahApp(QMainWindow):
             # 4. Optional: Clear guest data from file_manager if it exists
             if self.file_manager:
                 # We can either delete it to force a fresh start later or just leave it
-                # self.file_manager.deleteLater() 
-                # self.file_manager = None
+                self.file_manager.deleteLater() 
+                self.file_manager = None
                 pass
     
     def on_logout(self):

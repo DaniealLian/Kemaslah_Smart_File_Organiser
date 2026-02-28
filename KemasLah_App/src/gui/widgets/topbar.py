@@ -1,6 +1,7 @@
 import os
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QLineEdit
-from PyQt6.QtCore import pyqtSignal, QDir
+from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtCore import pyqtSignal, QDir, QSize
 
 class TopBar(QWidget):
     path_changed = pyqtSignal(str)
@@ -11,27 +12,44 @@ class TopBar(QWidget):
         self.init_ui()
         
     def init_ui(self):
-        # (Your existing init_ui code is fine, keep it exactly as is)
+        # Main horizontal layout for the TopBar
         layout = QHBoxLayout()
         layout.setContentsMargins(20, 15, 20, 15)
+        layout.setSpacing(0)  # Remove extra spacing between the three main zones
         
+        # LEFT ZONE: Breadcrumbs
         self.breadcrumb_layout = QHBoxLayout()
         self.breadcrumb_layout.setSpacing(5)
+        self.breadcrumb_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Search bar setup...
+        # Add the breadcrumb layout to the main layout
+        layout.addLayout(self.breadcrumb_layout)
+        
+        # MIDDLE ZONE: The Spacer
+        layout.addStretch(1) 
+        
+        # RIGHT ZONE: Search Bar
         search_widget = QWidget()
-        search_layout = QHBoxLayout()
+        search_layout = QHBoxLayout(search_widget)
         search_layout.setContentsMargins(0, 0, 0, 0)
-        
-        search_label = QLabel("Search")
-        search_label.setStyleSheet("color: #888888; font-size: 11px;")
         
         search_input = QLineEdit()
         search_input.setPlaceholderText("Name, email, etc...")
         search_input.setFixedWidth(250)
-        search_input.setStyleSheet("""
+
+        # 1. Create the Search Action
+        # Replace 'assets/search_icon.png' with your actual icon path
+        search_icon_path = os.path.join(os.getcwd(), "assets", "search_icon.png")
+        search_action = QAction(QIcon(search_icon_path), "Search", self)
+        
+        # 2. Use self. here as well
+        search_input.addAction(search_action, QLineEdit.ActionPosition.LeadingPosition)
+
+        # 3. Update CSS to give the text room so it doesn't overlap the icon
+        search_input.setStyleSheet(""" 
             QLineEdit {
                 padding: 8px 12px;
+                padding-left: 35px; /* Extra padding on the left for the icon */
                 background-color: #2D3748;
                 border: 1px solid #4A5568;
                 border-radius: 6px;
@@ -40,12 +58,7 @@ class TopBar(QWidget):
             QLineEdit:focus { border-color: #4A9EFF; }
         """)
         
-        search_layout.addWidget(search_label)
         search_layout.addWidget(search_input)
-        search_widget.setLayout(search_layout)
-        
-        layout.addLayout(self.breadcrumb_layout)
-        layout.addStretch()
         layout.addWidget(search_widget)
         self.setLayout(layout)
 

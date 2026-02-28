@@ -3,8 +3,8 @@ import shutil
 import datetime
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QCheckBox, QTableWidget, 
                              QTableWidgetItem, QHBoxLayout, QHeaderView, 
-                             QFileIconProvider, QInputDialog, QMessageBox, QAbstractItemView)
-from PyQt6.QtGui import QIcon
+                             QFileIconProvider, QInputDialog, QMessageBox, QAbstractItemView, QMenu)
+from PyQt6.QtGui import QIcon, QAction
 from PyQt6.QtCore import Qt, pyqtSignal, QFileInfo, QSize
 
 class FileTableWidget(QWidget):
@@ -89,6 +89,9 @@ class FileTableWidget(QWidget):
                 outline: none;
             }
         """)
+
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_context_menu)
         
         # Header Sizing
         header = self.table.horizontalHeader()
@@ -322,3 +325,76 @@ class FileTableWidget(QWidget):
                 os.startfile(full_path)
             except Exception as e:
                 print(f"Error opening file: {e}")
+    
+    def show_context_menu(self, position):
+        # 1. Check if a specific item was clicked
+        item = self.table.itemAt(position)
+        has_selection = item is not None
+
+        # 2. Create the Menu
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #2D3748;
+                color: #E0E0E0;
+                border: 1px solid #4A5568;
+                border-radius: 5px;
+                padding: 5px;
+            }
+            QMenu::item {
+                padding: 6px 25px 6px 20px;
+                border-radius: 3px;
+            }
+            QMenu::item:selected {
+                background-color: #2563EB;
+                color: white;
+            }
+            QMenu::item:disabled {
+                color: #718096;
+            }
+        """)
+
+        # 3. Create Actions matching the ActionBar
+        action_new = QAction("➕ New", self)
+        action_cut = QAction("✂ Cut", self)
+        action_copy = QAction("📋 Copy", self)
+        action_paste = QAction("📄 Paste", self)
+        action_rename = QAction("✏ Rename", self)
+        action_share = QAction("⤴ Share", self)
+        action_delete = QAction("🗑 Delete", self)
+
+        # 4. Disable actions that require a file to be selected if clicking empty space
+        if not has_selection:
+            action_cut.setEnabled(False)
+            action_copy.setEnabled(False)
+            action_rename.setEnabled(False)
+            action_share.setEnabled(False)
+            action_delete.setEnabled(False)
+
+        # 5. Disable Paste if clipboard is empty
+        if not self.clipboard_files:
+            action_paste.setEnabled(False)
+
+        # 6. Add Actions to Menu
+        menu.addAction(action_new)
+        menu.addSeparator() # Adds a nice visual line
+        menu.addAction(action_cut)
+        menu.addAction(action_copy)
+        menu.addAction(action_paste)
+        menu.addSeparator()
+        menu.addAction(action_rename)
+        menu.addAction(action_share)
+        menu.addSeparator()
+        menu.addAction(action_delete)
+
+        # 7. Show the menu and capture the user's choice
+        action = menu.exec(self.table.viewport().mapToGlobal(position))
+
+        # 8. Route the choice to your existing logic
+        if action == action_new: self.perform_action("new")
+        elif action == action_cut: self.perform_action("cut")
+        elif action == action_copy: self.perform_action("copy")
+        elif action == action_paste: self.perform_action("paste")
+        elif action == action_rename: self.perform_action("rename")
+        elif action == action_share: self.perform_action("share")
+        elif action == action_delete: self.perform_action("delete")

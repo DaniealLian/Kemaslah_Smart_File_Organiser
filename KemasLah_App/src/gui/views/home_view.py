@@ -5,12 +5,15 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                              QTableWidget, QTableWidgetItem, QHeaderView, 
                              QAbstractItemView, QStackedWidget)
 from PyQt6.QtGui import QColor
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 
 # Import your custom widgets
 from ..widgets.stat_card import StatCard
 
 class HomeView(QWidget):
+
+    folder_opened = pyqtSignal(str)
+
     def __init__(self):
         super().__init__()
         self.tab_buttons = {} # Store buttons to update styles
@@ -244,7 +247,13 @@ class HomeView(QWidget):
         path = item.data(Qt.ItemDataRole.UserRole)
         
         if path and os.path.exists(path):
-            try:
-                os.startfile(path)
-            except Exception as e:
-                print(f"Could not open file: {e}")
+            # 2. Check if it's a folder or a file
+            if os.path.isdir(path):
+                # It's a folder: Emit signal to tell main.py to switch views
+                self.folder_opened.emit(path)
+            else:
+                # It's a file: Open with native Windows app
+                try:
+                    os.startfile(path)
+                except Exception as e:
+                    print(f"Could not open file: {e}")
