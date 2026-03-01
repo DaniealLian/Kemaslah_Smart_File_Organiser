@@ -2,7 +2,7 @@ import sys
 import threading
 import logging
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QStackedWidget, QVBoxLayout
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtCharts import QChart, QChartView, QPieSeries
 from PyQt6.QtWidgets import QMessageBox
 
@@ -59,21 +59,25 @@ class SmartFileManager(QMainWindow):
         # --- GLOBAL HEADER ---
         self.top_bar = TopBar()
         self.top_bar.path_changed.connect(self.on_topbar_nav)
+        self.top_bar.search_query_changed.connect(self.handle_search)
         right_layout.addWidget(self.top_bar)
-        
-        self.action_bar = ActionBar(True, "Smart Organise")
-        self.action_bar.action_clicked.connect(self.handle_action_bar)
-        self.action_bar.smart_organise_clicked.connect(self.handle_smart_organise)
-        right_layout.addWidget(self.action_bar)
-        # ---------------------
-        
-        # 4. Content Area (The pages that change)
+
+        #Content Area
         self.stack = QStackedWidget()
-        
         self.home_view = HomeView()
         self.files_view = FileBrowserView()
         self.archive_view = ArchiveView()
         self.statistics_view = StatisticsView()
+        
+        self.action_bar = ActionBar(True, "Smart Organise")
+        self.action_bar.action_clicked.connect(self.handle_action_bar)
+        self.action_bar.smart_organise_clicked.connect(self.handle_smart_organise)
+        
+        self.action_bar.nav_back_clicked.connect(self.files_view.go_back)
+        self.action_bar.nav_forward_clicked.connect(self.files_view.go_forward)
+
+        right_layout.addWidget(self.action_bar)
+        # ---------------------
         
         # Connect the File Browser to update the Top Bar
         self.files_view.path_changed.connect(self.top_bar.update_breadcrumbs)
@@ -127,6 +131,8 @@ class SmartFileManager(QMainWindow):
         if identifier == "settings":
             self.show_settings_overlay()
         else:
+            self.sidebar.set_active(identifier)
+
             if identifier == "home":
                 self.stack.setCurrentWidget(self.home_view)
                 self.top_bar.update_breadcrumbs("Home")
@@ -178,6 +184,32 @@ class SmartFileManager(QMainWindow):
         # 2. Switch the UI stack to show the files view
         self.switch_view("files")
         self.sidebar.set_active("files")
+    
+    def handle_search(self, query):
+        """Passes the search text to the file table and ensures we are on the files view"""
+        
+        # 1. If we are NOT currently on the files view, switch to it first
+        if self.stack.currentWidget() != self.files_view:
+            self.switch_view("files")
+                
+        # 2. Now that the view is correct, execute the recursive background search
+        self.files_view.file_table.filter_files(query)
+    
+    def mousePressEvent(self, event):
+        """Global listener for Mouse side buttons"""
+        # Only allow navigation if we are actually looking at the files view
+        if self.stack.currentWidget() == self.files_view:
+            if event.button() == Qt.MouseButton.BackButton:
+                self.files_view.go_back()
+                event.accept() # Tell Qt we handled this click
+                return
+            elif event.button() == Qt.MouseButton.ForwardButton:
+                self.files_view.go_forward()
+                event.accept()
+                return
+                
+        # Pass any other clicks (like Left/Right click) to their normal behaviors
+        super().mousePressEvent(event)
 
 
 class KemaslahApp(QMainWindow):

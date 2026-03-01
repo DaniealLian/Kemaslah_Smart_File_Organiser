@@ -3,8 +3,12 @@ from PyQt6.QtCore import pyqtSignal
 
 class ActionBar(QWidget):
     # Define signals for each action
-    action_clicked = pyqtSignal(str) # Emits "new", "cut", "copy", etc.
+    action_clicked = pyqtSignal(str) 
     smart_organise_clicked = pyqtSignal()
+    
+    # --- NEW: Navigation Signals ---
+    nav_back_clicked = pyqtSignal()
+    nav_forward_clicked = pyqtSignal()
 
     def __init__(self, show_smart_button=True, button_text="Smart Organise"):
         super().__init__()
@@ -13,6 +17,47 @@ class ActionBar(QWidget):
     def init_ui(self, show_smart_button, button_text):
         layout = QHBoxLayout()
         layout.setContentsMargins(20, 10, 20, 10)
+        
+        button_style = """
+            QPushButton {
+                padding: 8px 16px;
+                background-color: #2D3748;
+                color: #E0E0E0;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+            }
+            QPushButton:hover { background-color: #3A4556; }
+            QPushButton:pressed { background-color: #4A5568; }
+            QPushButton:disabled { background-color: #1A202C; color: #4A5568; }
+        """
+
+        nav_btn_style = """
+            QPushButton {
+                padding: 8px 16px;
+                background-color: #1976D2;
+                color: #E0E0E0;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+            }
+            QPushButton:hover { background-color: #09386B; }
+            QPushButton:pressed { background-color: #09386B; }
+            QPushButton:disabled { background-color: #1A202C; color: #4A5568; }
+        """
+
+        # --- NEW: Navigation Buttons ---
+        self.back_btn = QPushButton("<")
+        self.back_btn.setStyleSheet(nav_btn_style)
+        self.back_btn.setFixedWidth(40) # Make them square-ish
+        self.back_btn.clicked.connect(self.nav_back_clicked.emit)
+        layout.addWidget(self.back_btn)
+
+        self.forward_btn = QPushButton(">")
+        self.forward_btn.setStyleSheet(nav_btn_style)
+        self.forward_btn.setFixedWidth(40)
+        self.forward_btn.clicked.connect(self.nav_forward_clicked.emit)
+        layout.addWidget(self.forward_btn)
         
         # Action buttons configuration: (Label, Signal Name)
         actions = [
@@ -27,23 +72,7 @@ class ActionBar(QWidget):
         
         for text, action_name in actions:
             btn = QPushButton(text)
-            btn.setStyleSheet("""
-                QPushButton {
-                    padding: 8px 16px;
-                    background-color: #2D3748;
-                    color: #E0E0E0;
-                    border: none;
-                    border-radius: 6px;
-                    font-size: 13px;
-                }
-                QPushButton:hover {
-                    background-color: #3A4556;
-                }
-                QPushButton:pressed {
-                    background-color: #4A5568;
-                }
-            """)
-            # Connect click to signal emission
+            btn.setStyleSheet(button_style)
             btn.clicked.connect(lambda checked, a=action_name: self.action_clicked.emit(a))
             layout.addWidget(btn)
         

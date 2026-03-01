@@ -5,6 +5,7 @@ from PyQt6.QtCore import pyqtSignal, QDir, QSize
 
 class TopBar(QWidget):
     path_changed = pyqtSignal(str)
+    search_query_changed = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -33,20 +34,19 @@ class TopBar(QWidget):
         search_layout = QHBoxLayout(search_widget)
         search_layout.setContentsMargins(0, 0, 0, 0)
         
-        search_input = QLineEdit()
-        search_input.setPlaceholderText("Name, email, etc...")
-        search_input.setFixedWidth(250)
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Name, email, etc...")
+        self.search_input.setFixedWidth(250)
 
-        # 1. Create the Search Action
-        # Replace 'assets/search_icon.png' with your actual icon path
+        # the Search Action
         search_icon_path = os.path.join(os.getcwd(), "assets", "search_icon.png")
         search_action = QAction(QIcon(search_icon_path), "Search", self)
-        
-        # 2. Use self. here as well
-        search_input.addAction(search_action, QLineEdit.ActionPosition.LeadingPosition)
 
-        # 3. Update CSS to give the text room so it doesn't overlap the icon
-        search_input.setStyleSheet(""" 
+        search_action.triggered.connect(self.emit_search)
+        self.search_input.addAction(search_action, QLineEdit.ActionPosition.LeadingPosition)
+        self.search_input.returnPressed.connect(self.emit_search)
+
+        self.search_input.setStyleSheet(""" 
             QLineEdit {
                 padding: 8px 12px;
                 padding-left: 35px; /* Extra padding on the left for the icon */
@@ -58,7 +58,7 @@ class TopBar(QWidget):
             QLineEdit:focus { border-color: #4A9EFF; }
         """)
         
-        search_layout.addWidget(search_input)
+        search_layout.addWidget(self.search_input)
         layout.addWidget(search_widget)
         self.setLayout(layout)
 
@@ -126,3 +126,7 @@ class TopBar(QWidget):
         label = QLabel(text)
         label.setStyleSheet("color: #C0C0C0; font-weight: bold; font-size: 14px; padding-left: 5px;")
         self.breadcrumb_layout.addWidget(label)
+
+    def emit_search(self):
+        """Broadcasts the search text only when Enter is pressed or Icon is clicked"""
+        self.search_query_changed.emit(self.search_input.text())

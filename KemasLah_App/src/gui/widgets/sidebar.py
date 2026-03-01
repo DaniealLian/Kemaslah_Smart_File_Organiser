@@ -1,5 +1,7 @@
+import os
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, QSize
+from PyQt6.QtGui import QIcon
 
 class CircularImage(QLabel):
     def __init__(self, size=50):
@@ -65,9 +67,14 @@ class Sidebar(QWidget):
         profile_layout.addLayout(profile_info)
         
         # Sign out icon
-        signout_btn = QPushButton("→")
-        signout_btn.setFixedSize(30, 30)
-        signout_btn.setStyleSheet("""
+        self.signout_btn = QPushButton()
+        self.signout_btn.setFixedSize(30, 30)
+
+        icon_path = os.path.join(os.getcwd(), "assets", "logout.png")
+        self.signout_btn.setIcon(QIcon(icon_path))
+        self.signout_btn.setIconSize(QSize(30, 30))
+
+        self.signout_btn.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
                 color: #FF4444;
@@ -78,8 +85,8 @@ class Sidebar(QWidget):
                 background-color: rgba(255, 68, 68, 0.1);
             }
         """)
-        signout_btn.clicked.connect(self.logout_requested.emit)  # CONNECT THIS
-        profile_layout.addWidget(signout_btn)
+        self.signout_btn.clicked.connect(self.logout_requested.emit)  # CONNECT THIS
+        profile_layout.addWidget(self.signout_btn)
         
         profile_widget.setLayout(profile_layout)
         layout.addWidget(profile_widget)
@@ -140,3 +147,13 @@ class Sidebar(QWidget):
         # Emit signal with identifier
         identifier = button.property("identifier")
         self.navigation_changed.emit(identifier)
+    
+    def set_active(self, identifier):
+        """Programmatically highlights a specific sidebar button by its identifier"""
+        for btn in self.nav_buttons:
+            # If the button's ID matches the one we want, check it (highlight it)
+            if btn.property("identifier") == identifier:
+                btn.setChecked(True)
+            # Otherwise, uncheck it (remove highlight)
+            else:
+                btn.setChecked(False)

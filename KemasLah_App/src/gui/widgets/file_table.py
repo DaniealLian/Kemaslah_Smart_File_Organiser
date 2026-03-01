@@ -5,7 +5,57 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QCheckBox, QTableWidget,
                              QTableWidgetItem, QHBoxLayout, QHeaderView, 
                              QFileIconProvider, QInputDialog, QMessageBox, QAbstractItemView, QMenu)
 from PyQt6.QtGui import QIcon, QAction
-from PyQt6.QtCore import Qt, pyqtSignal, QFileInfo, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QFileInfo, QSize, QThread
+
+class SearchWorker(QThread):
+    # This signal sends the data back to the main UI safely: (name, full_path, is_dir)
+    match_found = pyqtSignal(str, str, bool)
+    search_finished = pyqtSignal(int)
+
+    def __init__(self, query, start_path, limit=100):
+        super().__init__()
+        self.query = query
+        self.start_path = start_path
+        self.limit = limit
+        self.is_running = True # Flag to let us cancel the search early
+
+    def run(self):
+        """This runs completely in the background"""
+        matches_found = 0
+        try:
+            for root, dirs, files in os.walk(self.start_path):
+                if not self.is_running: break
+
+                # 1. Search Folders
+                for d in dirs:
+                    if not self.is_running: break
+                    if self.query in d.lower():
+                        full_path = os.path.join(root, d)
+                        self.match_found.emit(d, full_path, True)
+                        matches_found += 1
+                        if matches_found >= self.limit: break
+
+                if matches_found >= self.limit or not self.is_running: break
+
+                # 2. Search Files
+                for f in files:
+                    if not self.is_running: break
+                    if self.query in f.lower():
+                        full_path = os.path.join(root, f)
+                        self.match_found.emit(f, full_path, False)
+                        matches_found += 1
+                        if matches_found >= self.limit: break
+
+                if matches_found >= self.limit or not self.is_running: break
+                
+        except Exception as e:
+            print(f"Background search error: {e}")
+        finally:
+            self.search_finished.emit(matches_found)
+
+    def stop(self):
+        """Safely stops the background process"""
+        self.is_running = False
 
 class FileTableWidget(QWidget):
     folder_opened = pyqtSignal(str)
@@ -17,8 +67,9 @@ class FileTableWidget(QWidget):
         
         # Internal Clipboard
         self.clipboard_files = [] 
-        self.clipboard_action = None # 'copy' or 'cut'
-        
+        self.clipboard_action = None
+
+        self.search_worker = None
         self.init_ui()
         
     def init_ui(self):
@@ -398,3 +449,72 @@ class FileTableWidget(QWidget):
         elif action == action_rename: self.perform_action("rename")
         elif action == action_share: self.perform_action("share")
         elif action == action_delete: self.perform_action("delete")
+
+    def filter_files(self, query):
+        """Starts the background thread to search recursively without freezing"""
+        query = query.lower().strip()
+        
+        # 1. If a search is already running, cancel it
+        if self.search_worker and self.search_worker.isRunning():
+            self.search_worker.stop()
+            self.search_worker.wait() # Wait for it to safely terminate
+
+        # 2. If search box is empty, load normal folder
+        if not query:
+            self.load_files(self.current_path)
+            return
+
+        # 3. Prepare the UI
+        self.table.setRowCount(0)
+        self.select_all_cb.setChecked(False)
+        
+        # 4. Start the Background Search
+        self.search_worker = SearchWorker(query, self.current_path, limit=100)
+        
+        # Connect the worker's signal directly to your existing row builder!
+        self.search_worker.match_found.connect(self._add_search_row)
+        
+        # Optional: Do something when finished (like show a message if 0 matches)
+        self.search_worker.search_finished.connect(lambda count: print(f"Found {count}"))
+        
+        self.search_worker.start()
+
+    def _add_search_row(self, name, full_path, is_dir):
+        """Helper method to format and insert search results into the table"""
+        try:
+            stat_info = os.stat(full_path)
+        except Exception:
+            return # Skip if the file is locked by Windows or requires admin rights
+            
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        
+        # 1. Name & Tooltip (Hover to see where the file actually lives!)
+        name_item = QTableWidgetItem(name)
+        name_item.setData(Qt.ItemDataRole.UserRole, is_dir)
+        name_item.setData(Qt.ItemDataRole.UserRole + 1, full_path)
+        name_item.setToolTip(full_path) # Very helpful for recursive searches
+        
+        file_info = QFileInfo(full_path)
+        name_item.setIcon(self.icon_provider.icon(file_info))
+        self.table.setItem(row, 0, name_item)
+        
+        # 2. Date
+        mod_time = datetime.datetime.fromtimestamp(stat_info.st_mtime)
+        self.table.setItem(row, 1, QTableWidgetItem(mod_time.strftime("%d/%m/%Y")))
+        
+        # 3. Type
+        type_str = "File Folder" if is_dir else "File"
+        if not is_dir and '.' in name:
+            type_str = name.split('.')[-1].upper() + " File"
+        self.table.setItem(row, 2, QTableWidgetItem(type_str))
+        
+        # 4. Size
+        size_str = "-"
+        if not is_dir:
+            s = stat_info.st_size
+            if s > 1024**3: size_str = f"{s/(1024**3):.1f} GB"
+            elif s > 1024**2: size_str = f"{s/(1024**2):.1f} MB"
+            elif s > 1024: size_str = f"{s/1024:.0f} KB"
+            else: size_str = f"{s} B"
+        self.table.setItem(row, 3, QTableWidgetItem(size_str))
