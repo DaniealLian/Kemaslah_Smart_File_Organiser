@@ -1,7 +1,8 @@
 import os
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
-from PyQt6.QtCore import pyqtSignal, QSize
-from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import pyqtSignal, QSize,Qt
+from PyQt6.QtGui import QIcon, QFontMetrics
+from auth.authentication_page import translate_text
 
 class CircularImage(QLabel):
     def __init__(self, size=50):
@@ -26,17 +27,21 @@ class Sidebar(QWidget):
         self.init_ui()
 
     def set_user_data(self, user_data):
-        """Update sidebar with user information"""
+        """Update sidebar with user information and elide long emails"""
         self.user_data = user_data
         
-        # Update profile display
         display_name = user_data.get('display_name') or user_data.get('username', 'User')
         email = user_data.get('email', '')
-        initials = user_data.get('initials', 'U')
 
-        # Actually update the visible labels
         self.title_label.setText(display_name)
-        self.desc_label.setText(email)
+        
+        # Apply eliding logic to the new email
+        metrics = QFontMetrics(self.desc_label.font())
+        # Use the same 140px limit as in init_ui
+        elided_email = metrics.elidedText(email, Qt.TextElideMode.ElideRight, 140)
+        
+        self.desc_label.setText(elided_email)
+        self.desc_label.setToolTip(email)
         
     def init_ui(self):
         layout = QVBoxLayout()
@@ -49,18 +54,26 @@ class Sidebar(QWidget):
         profile_layout.setContentsMargins(20, 10, 20, 20)
         
         self.profile_pic = CircularImage(40)
-        # If you want to show initials:
-        # self.profile_pic.setText(self.user_data.get('initials', 'U'))
         profile_layout.addWidget(self.profile_pic)
-        
         profile_info = QVBoxLayout()
         profile_info.setSpacing(2)
         
         self.title_label = QLabel(self.user_data.get('display_name', 'User'))
         self.title_label.setStyleSheet("color: #E0E0E0; font-size: 14px; font-weight: bold;")
         
-        self.desc_label = QLabel(self.user_data.get('email', 'user@example.com'))
+        # Get the email and define a pixel limit (e.g., 140px)
+        email_text = self.user_data.get('email', 'user@example.com')
+        limit = 140 
+
+        self.desc_label = QLabel()
         self.desc_label.setStyleSheet("color: #888888; font-size: 11px;")
+        
+        # Calculate and set elided text
+        metrics = QFontMetrics(self.desc_label.font())
+        elided_email = metrics.elidedText(email_text, Qt.TextElideMode.ElideRight, limit)
+        
+        self.desc_label.setText(elided_email)
+        self.desc_label.setToolTip(email_text)
         
         profile_info.addWidget(self.title_label)
         profile_info.addWidget(self.desc_label)
@@ -105,7 +118,9 @@ class Sidebar(QWidget):
         for text, identifier in nav_items:
             btn = QPushButton(text)
             btn.setProperty("identifier", identifier)
+            btn.setProperty("base_text", text)
             btn.setCheckable(True)
+
             is_submenu = text.startswith("  ")
             
             btn.setStyleSheet(f"""
@@ -137,7 +152,7 @@ class Sidebar(QWidget):
         
         # Set home as default
         self.nav_buttons[0].setChecked(True)
-        pass
+        
     
     def on_nav_clicked(self, button):
         for btn in self.nav_buttons:
@@ -157,3 +172,19 @@ class Sidebar(QWidget):
             # Otherwise, uncheck it (remove highlight)
             else:
                 btn.setChecked(False)
+
+    def update_translations(self, lang_code):
+        """Translates all sidebar navigation items"""
+        for btn in self.nav_buttons:
+            base_text = btn.property("base_text")
+            
+            # Strip whitespace, translate, then restore any visual indentation
+            is_submenu = base_text.startswith("  ")
+            clean_text = base_text.strip()
+            
+            translated_text = translate_text(clean_text, lang_code)
+            
+            if is_submenu:
+                btn.setText(f"  {translated_text}")
+            else:
+                btn.setText(translated_text)

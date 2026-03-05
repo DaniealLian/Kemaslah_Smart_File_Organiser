@@ -1,6 +1,7 @@
 import os
 import shutil
 import datetime
+from send2trash import send2trash # <--- NEW: Import the trash library
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QCheckBox, QTableWidget, 
                              QTableWidgetItem, QHBoxLayout, QHeaderView, 
                              QFileIconProvider, QInputDialog, QMessageBox, QAbstractItemView, QMenu)
@@ -300,10 +301,11 @@ class FileTableWidget(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Could not rename:\n{str(e)}")
 
-    def delete_items(self, paths):
-        text = f"Are you sure you want to delete {len(paths)} items?"
+    def delete_items(self, paths):  
+        # Updated text to clarify it goes to the Recycle Bin
+        text = f"Are you sure you want to move {len(paths)} items to the Recycle Bin?"
         if len(paths) == 1:
-            text = f"Are you sure you want to delete '{os.path.basename(paths[0])}'?"
+            text = f"Are you sure you want to move '{os.path.basename(paths[0])}' to the Recycle Bin?"
             
         reply = QMessageBox.question(self, "Delete", text,
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -311,13 +313,9 @@ class FileTableWidget(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             for path in paths:
                 try:
-                    if os.path.isdir(path):
-                        # Force delete directory
-                        shutil.rmtree(path)
-                    else:
-                        os.remove(path)
+                    send2trash(path)
                 except Exception as e:
-                    QMessageBox.warning(self, "Error", f"Could not delete {os.path.basename(path)}:\n{e}")
+                    QMessageBox.warning(self, "Error", f"Could not move {os.path.basename(path)} to trash:\n{e}")
             self.load_files(self.current_path)
 
     def paste_items(self):

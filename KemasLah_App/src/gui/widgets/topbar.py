@@ -2,6 +2,7 @@ import os
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QLineEdit
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtCore import pyqtSignal, QDir, QSize
+from auth.authentication_page import translate_text
 
 class TopBar(QWidget):
     path_changed = pyqtSignal(str)
@@ -10,6 +11,7 @@ class TopBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current_path = ""
+        self.current_lang = "en" # NEW: Track current language
         self.init_ui()
         
     def init_ui(self):
@@ -62,6 +64,18 @@ class TopBar(QWidget):
         layout.addWidget(search_widget)
         self.setLayout(layout)
 
+    def update_translations(self, lang_code):
+        """Translates the top bar elements"""
+        self.current_lang = lang_code
+        
+        # 1. Translate Search Bar Placeholder
+        translated_placeholder = translate_text("Name, email, etc...", lang_code)
+        self.search_input.setPlaceholderText(translated_placeholder)
+        
+        # 2. Refresh the breadcrumbs so static pages translate instantly
+        if self.current_path:
+            self.update_breadcrumbs(self.current_path)
+
     def update_breadcrumbs(self, path):
         self.current_path = path
         
@@ -72,8 +86,9 @@ class TopBar(QWidget):
                 child.widget().deleteLater()
 
         # 2. Handle Special Pages (Home, Settings, etc.)
-        if path in ["Home", "Smart Archive", "Settings"] or not os.path.isabs(path):
-            self.add_crumb_label(path)
+        if path in ["Home", "Smart Archive", "Settings", "Statistics"] or not os.path.isabs(path):
+            translated_path = translate_text(path, getattr(self, 'current_lang', 'en'))
+            self.add_crumb_label(translated_path)
             return
 
         # 3. Handle Real File Paths (e.g., C:/Users/Docs)

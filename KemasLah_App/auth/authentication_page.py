@@ -400,8 +400,8 @@ class ForgotPasswordPage(QWidget):
         
         try:
             if verify_otp(email, otp): 
-                self.stack.widget(4).set_email(email); 
-                self.stack.setCurrentIndex(4) 
+                self.stack.widget(3).set_email(email)  
+                self.stack.setCurrentIndex(3)           
             else: 
                 QMessageBox.critical(self, "Error", "Invalid or expired OTP code.")
         except Exception as e:

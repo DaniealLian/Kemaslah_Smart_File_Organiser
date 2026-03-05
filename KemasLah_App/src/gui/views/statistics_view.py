@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt6.QtCore import QDir, Qt      # Import Qt
 from ..widgets.pie_chart import PieChartWidget
 from ..widgets.stat_card import StatCard
+from auth.authentication_page import translate_text
 
 class StatisticsView(QWidget):
     def __init__(self):
@@ -113,7 +114,8 @@ class StatisticsView(QWidget):
             (f"Other\n({t['Other']})", (t['Other']/total_files)*100)
         ]
         file_types_data = [item for item in file_types_data if item[1] > 0]
-        charts_layout.addWidget(PieChartWidget("Distribution of File Types", file_types_data))
+        self.file_chart = PieChartWidget("Distribution of File Types", file_types_data)
+        charts_layout.addWidget(self.file_chart)
         
         # 2. Chart: Locations
         l = self.stats["locations"]
@@ -125,7 +127,8 @@ class StatisticsView(QWidget):
                 percentage = (size_bytes / total_loc_size) * 100
                 if percentage > 1:
                     location_data.append((f"{name}", percentage))
-        charts_layout.addWidget(PieChartWidget("Storage Used by Location", location_data))
+        self.loc_chart = PieChartWidget("Storage Used by Location", location_data)
+        charts_layout.addWidget(self.loc_chart)
         
         # Set the content into the scroll area
         scroll_area.setWidget(scroll_content)
@@ -133,57 +136,83 @@ class StatisticsView(QWidget):
         # Add Scroll Area to Main Row (Ratio 2)
         top_row.addWidget(scroll_area, 2)
         
-        # --- RIGHT COLUMN: STAT CARDS (Fixed) ---
+        # --- RIGHT COLUMN: STAT CARDS ---
         stats_column = QVBoxLayout()
         stats_column.setSpacing(15)
         
-        total_card = StatCard("Local Disk (C:)", self.stats["sys_used_gb"], self.stats["sys_total_gb"], "#2563EB")
-        
+        self.total_card = StatCard("Local Disk (C:)", self.stats["sys_used_gb"], self.stats["sys_total_gb"], "#2563EB")        
         archivable_gb = round(self.stats["archivable_gb"], 1)
         scanned_total_gb = round(self.stats["total_scanned_gb"], 1)
         if scanned_total_gb == 0: scanned_total_gb = 1
-        archive_card = StatCard("Archivable Files (>6mo)", archivable_gb, scanned_total_gb, "#8B5CF6")
-        
+        self.archive_card = StatCard("Archivable Files (>6mo)", archivable_gb, scanned_total_gb, "#8B5CF6")       
+ 
         # Feature usage card (Dummy)
         usage_card = QWidget()
         usage_layout = QVBoxLayout()
         usage_layout.setContentsMargins(20, 15, 20, 15)
-        usage_title = QLabel("Application's Feature Usage")
-        usage_title.setStyleSheet("color: #C0C0C0; font-size: 14px; font-weight: bold;")
-        usage_layout.addWidget(usage_title)
-        organise_label = QLabel("Smart Organise")
-        organise_label.setStyleSheet("color: #E0E0E0; font-size: 16px; font-weight: bold; margin-top: 10px;")
-        usage_layout.addWidget(organise_label)
+
+        # CHANGED: Add self. to all text-bearing labels
+        self.usage_title = QLabel("Application's Feature Usage")
+        self.usage_title.setStyleSheet("color: #C0C0C0; font-size: 14px; font-weight: bold;")
+        usage_layout.addWidget(self.usage_title)
+        
+        self.organise_label = QLabel("Smart Organise")
+        self.organise_label.setStyleSheet("color: #E0E0E0; font-size: 16px; font-weight: bold; margin-top: 10px;")
+        usage_layout.addWidget(self.organise_label)
+        
         organise_stats = QHBoxLayout()
-        usage_count = QLabel("Number of usage: 10")
-        usage_count.setStyleSheet("color: #C0C0C0; font-size: 12px;")
-        last_used = QLabel("Last used: 10 days ago")
-        last_used.setStyleSheet("color: #888888; font-size: 12px;")
-        organise_stats.addWidget(usage_count)
+        self.usage_count = QLabel("Number of usage: 10")
+        self.usage_count.setStyleSheet("color: #C0C0C0; font-size: 12px;")
+        
+        self.last_used = QLabel("Last used: 10 days ago")
+        self.last_used.setStyleSheet("color: #888888; font-size: 12px;")
+        
+        organise_stats.addWidget(self.usage_count)
         organise_stats.addStretch()
-        organise_stats.addWidget(last_used)
+        organise_stats.addWidget(self.last_used)
         usage_layout.addLayout(organise_stats)
-        archive_label = QLabel("Smart Archive")
-        archive_label.setStyleSheet("color: #E0E0E0; font-size: 16px; font-weight: bold; margin-top: 15px;")
-        usage_layout.addWidget(archive_label)
+        
+        self.archive_label = QLabel("Smart Archive")
+        self.archive_label.setStyleSheet("color: #E0E0E0; font-size: 16px; font-weight: bold; margin-top: 15px;")
+        usage_layout.addWidget(self.archive_label)
+        
         archive_stats = QHBoxLayout()
-        archive_count = QLabel("Number of usage: 5")
-        archive_count.setStyleSheet("color: #C0C0C0; font-size: 12px;")
-        archive_last = QLabel("Last used: 20 days ago")
-        archive_last.setStyleSheet("color: #888888; font-size: 12px;")
-        archive_stats.addWidget(archive_count)
+        self.archive_count = QLabel("Number of usage: 5")
+        self.archive_count.setStyleSheet("color: #C0C0C0; font-size: 12px;")
+        
+        self.archive_last = QLabel("Last used: 20 days ago")
+        self.archive_last.setStyleSheet("color: #888888; font-size: 12px;")
+        
+        archive_stats.addWidget(self.archive_count)
         archive_stats.addStretch()
-        archive_stats.addWidget(archive_last)
+        archive_stats.addWidget(self.archive_last)
         usage_layout.addLayout(archive_stats)
+        
         usage_card.setLayout(usage_layout)
         usage_card.setStyleSheet("QWidget { background-color: #2D3748; border-radius: 8px; }")
         
-        stats_column.addWidget(total_card)
-        stats_column.addWidget(archive_card)
+        stats_column.addWidget(self.total_card)
+        stats_column.addWidget(self.archive_card)
         stats_column.addWidget(usage_card)
         
-        # Add Right Column to Main Row (Ratio 1)
         top_row.addLayout(stats_column, 1)
 
         layout.addLayout(top_row)
         self.setLayout(layout)
+
+    def update_translations(self, lang_code):
+        # 1. Pass translation command down to the custom widgets
+        self.file_chart.update_translations(lang_code)
+        self.loc_chart.update_translations(lang_code)
+        self.total_card.update_translations(lang_code)
+        self.archive_card.update_translations(lang_code)
+
+        # 2. Translate local fixed labels
+        self.usage_title.setText(translate_text("Application's Feature Usage", lang_code))
+        self.organise_label.setText(translate_text("Smart Organise", lang_code))
+        self.usage_count.setText(translate_text("Number of usage: 10", lang_code))
+        self.last_used.setText(translate_text("Last used: 10 days ago", lang_code))
+        
+        self.archive_label.setText(translate_text("Smart Archive", lang_code))
+        self.archive_count.setText(translate_text("Number of usage: 5", lang_code))
+        self.archive_last.setText(translate_text("Last used: 20 days ago", lang_code))

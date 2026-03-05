@@ -253,13 +253,8 @@ class KemaslahApp(QMainWindow):
     def on_login_success(self, user_data):
         """Called when user successfully logs in"""
         print(f"Login successful for: {user_data.get('email')}")
-        
-        #This is to refresh the data so that no previous user data is displayed after logout
-        if self.file_manager is not None:
-            self.stack.removeWidget(self.file_manager)
-            self.file_manager.deleteLater()
-            self.file_manager = None
 
+        self._destroy_file_manager()
         self.file_manager = SmartFileManager(user_data, auth_window=self.auth_window)
         self.file_manager.logout_requested.connect(self.on_logout)
         self.stack.addWidget(self.file_manager)
@@ -309,6 +304,7 @@ class KemaslahApp(QMainWindow):
         )
         
         if reply == QMessageBox.StandardButton.Yes:
+            self._destroy_file_manager()
             print("Returning to login screen from Guest mode...")
             
             # 1. Switch back to the auth window (index 0 in KemaslahApp stack)
@@ -321,23 +317,12 @@ class KemaslahApp(QMainWindow):
             self.setFixedSize(1000, 750)
             self.showNormal()
             
-            # 4. Optional: Clear guest data from file_manager if it exists
-            if self.file_manager:
-                # We can either delete it to force a fresh start later or just leave it
-                self.file_manager.deleteLater() 
-                self.file_manager = None
-                pass
     
     def on_logout(self):
         """Return to login screen"""
         print("Logging out...")
 
-        # Destroy the file manager entirely so the next login rebuilds everything
-        # from scratch — no stale user data anywhere (sidebar, settings overlay, etc.)
-        if self.file_manager is not None:
-            self.stack.removeWidget(self.file_manager)
-            self.file_manager.deleteLater()
-            self.file_manager = None
+        self._destroy_file_manager()
         
         # Clear login fields
         login_page = self.auth_window.stack.widget(0)
@@ -354,20 +339,27 @@ class KemaslahApp(QMainWindow):
         # Show login page
         self.auth_window.stack.setCurrentIndex(0)
 
+    def _destroy_file_manager(self):
+        """Cleanly removes and destroys the file manager to prevent stale user data."""
+        if self.file_manager is not None:
+            self.stack.removeWidget(self.file_manager)
+            self.file_manager.deleteLater()
+            self.file_manager = None
+
     def update_all_pages(self, lang_code):
-        """
-        Relays the translation update command to the auth window 
-        and the file manager (if it exists).
-        """
-        # Update the authentication stack pages
+        # Update auth pages
         if hasattr(self.auth_window, 'update_all_pages'):
             self.auth_window.update_all_pages(lang_code)
         
-        # Update the File Manager if the user is already inside the app
+        # Update File Manager Components
         if self.file_manager:
-            # If you add an update_translations method to SmartFileManager later, 
-            # call it here to change the Sidebar/Topbar language.
-            pass
+            # You can add a method to TopBar, Sidebar, and ActionBar to 
+            # re-run their init_ui text with translate_text(text, lang_code)
+            self.file_manager.top_bar.update_translations(lang_code)
+            self.file_manager.sidebar.update_translations(lang_code)
+            self.file_manager.action_bar.update_translations(lang_code)
+            self.file_manager.statistics_view.update_translations(lang_code)
+            self.file_manager.home_view.update_translations(lang_code)
 
 
 def run_server():

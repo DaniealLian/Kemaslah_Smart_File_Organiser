@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                              QAbstractItemView, QStackedWidget)
 from PyQt6.QtGui import QColor
 from PyQt6.QtCore import Qt, pyqtSignal
+from auth.authentication_page import translate_text # NEW: Import translation
 
 # Import your custom widgets
 from ..widgets.stat_card import StatCard
@@ -31,11 +32,11 @@ class HomeView(QWidget):
         
         total_gb, used_gb, free_gb = self.get_disk_usage()
         
-        total_card = StatCard("Local Disk (C:)", used_gb, total_gb, "#2563EB")
-        archive_card = StatCard("Potentially Archivable", 15, 125, "#8B5CF6")
+        self.total_card = StatCard("Local Disk (C:)", used_gb, total_gb, "#2563EB")
+        self.archive_card = StatCard("Potentially Archivable", 15, 125, "#8B5CF6")
         
-        stats_layout.addWidget(total_card, 1)
-        stats_layout.addWidget(archive_card, 1)
+        stats_layout.addWidget(self.total_card, 1)
+        stats_layout.addWidget(self.archive_card, 1)
         layout.addLayout(stats_layout)
         
         # --- 2. TABS (Buttons) ---
@@ -82,6 +83,31 @@ class HomeView(QWidget):
         tabs_layout.addWidget(self.content_stack)
         layout.addLayout(tabs_layout)
         self.setLayout(layout)
+
+    #-----Translate Logic-------
+    def update_translations(self, lang_code):
+        """Translates all text elements in the Home View"""
+        
+        # 1. Translate the Stat Cards
+        self.total_card.update_translations(lang_code)
+        self.archive_card.update_translations(lang_code)
+
+        # 2. Translate the Tab Buttons
+        for base_name, btn in self.tab_buttons.items():
+            translated_tab = translate_text(base_name, lang_code)
+            btn.setText(translated_tab)
+
+        # 3. Translate the Table Headers
+        translated_headers = [
+            translate_text("File Name", lang_code),
+            translate_text("Date Modified", lang_code),
+            translate_text("Type", lang_code)
+        ]
+        
+        # Apply new headers to all 3 tables
+        self.recent_table.setHorizontalHeaderLabels(translated_headers)
+        self.favorites_table.setHorizontalHeaderLabels(translated_headers)
+        self.shared_table.setHorizontalHeaderLabels(translated_headers)
 
     # --- TAB LOGIC ---
     def switch_tab(self, tab_name):

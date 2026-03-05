@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QPushButton
 from PyQt6.QtCore import pyqtSignal
+from auth.authentication_page import translate_text
 
 class ActionBar(QWidget):
     # Define signals for each action
@@ -61,7 +62,7 @@ class ActionBar(QWidget):
         
         # Action buttons configuration: (Label, Signal Name)
         actions = [
-            ("➕ New", "new"),
+            ("+ New", "new"),
             ("✂ Cut", "cut"),
             ("📋 Copy", "copy"),
             ("📄 Paste", "paste"),
@@ -69,19 +70,24 @@ class ActionBar(QWidget):
             ("⤴ Share", "share"),
             ("🗑 Delete", "delete")
         ]
+
+        self.action_buttons = {} # NEW: Store buttons to translate them later
         
         for text, action_name in actions:
             btn = QPushButton(text)
             btn.setStyleSheet(button_style)
             btn.clicked.connect(lambda checked, a=action_name: self.action_clicked.emit(a))
             layout.addWidget(btn)
+
+            self.action_buttons[action_name] = (text, btn)
         
         layout.addStretch()
         
         # Smart Organise button
         if show_smart_button:
-            smart_btn = QPushButton(f"✏ {button_text}")
-            smart_btn.setStyleSheet("""
+            self.smart_base_text = button_text # NEW: Store base text
+            self.smart_btn = QPushButton(f"✏ {button_text}") # NEW: Use self.smart_btn
+            self.smart_btn.setStyleSheet("""
                 QPushButton {
                     padding: 10px 20px;
                     background-color: #2563EB;
@@ -93,7 +99,22 @@ class ActionBar(QWidget):
                 }
                 QPushButton:hover { background-color: #1E40AF; }
             """)
-            smart_btn.clicked.connect(self.smart_organise_clicked.emit)
-            layout.addWidget(smart_btn)
+            self.smart_btn.clicked.connect(self.smart_organise_clicked.emit)
+            layout.addWidget(self.smart_btn)
 
         self.setLayout(layout)
+        
+    def update_translations(self, lang_code):
+        # 1. Translate main action buttons
+        for action_name, (original_text, btn) in self.action_buttons.items():
+            # Split the icon (e.g., "➕") from the word (e.g., "New")
+            parts = original_text.split(" ", 1)
+            if len(parts) == 2:
+                icon, word = parts
+                translated_word = translate_text(word, lang_code)
+                btn.setText(f"{icon} {translated_word}")
+
+        # 2. Translate Smart Organise button
+        if hasattr(self, 'smart_btn'):
+            translated_smart = translate_text(self.smart_base_text, lang_code)
+            self.smart_btn.setText(f"✏ {translated_smart}")
