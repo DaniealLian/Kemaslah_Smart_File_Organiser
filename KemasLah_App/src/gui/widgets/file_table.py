@@ -15,42 +15,96 @@ class SearchWorker(QThread):
 
     def __init__(self, query, start_path, limit=100):
         super().__init__()
-        self.query = query
+        self.query = query.lower()  # ✅ ensure lowercase once
         self.start_path = start_path
         self.limit = limit
-        self.is_running = True # Flag to let us cancel the search early
+        self.is_running = True
 
     def run(self):
         """This runs completely in the background"""
         matches_found = 0
+
         try:
             for root, dirs, files in os.walk(self.start_path):
-                if not self.is_running: break
+                if not self.is_running:
+                    break
 
-                # 1. Search Folders
+                # 1. Search Folders (unchanged)
                 for d in dirs:
-                    if not self.is_running: break
+                    if not self.is_running:
+                        break
                     if self.query in d.lower():
                         full_path = os.path.join(root, d)
                         self.match_found.emit(d, full_path, True)
                         matches_found += 1
-                        if matches_found >= self.limit: break
+                        if matches_found >= self.limit:
+                            break
 
-                if matches_found >= self.limit or not self.is_running: break
+                if matches_found >= self.limit or not self.is_running:
+                    break
 
-                # 2. Search Files
+                # 2. Search Files (UPDATED: filename + content)
                 for f in files:
-                    if not self.is_running: break
+                    if not self.is_running:
+                        break
+
+                    full_path = os.path.join(root, f)
+                    match = False
+
+                    # ✅ A. Search filename
                     if self.query in f.lower():
-                        full_path = os.path.join(root, f)
+                        match = True
+
+                    # ✅ B. Search file content (NEW)
+                    else:
+                        try:
+                            ext = f.split('.')[-1].lower()
+
+                            # --- TEXT FILES ---
+                            if ext in ['txt', 'csv', 'json']:
+                                with open(full_path, 'r', errors='ignore') as file:
+                                    content = file.read().lower()
+                                    if self.query in content:
+                                        match = True
+
+                            # --- PDF FILE ---
+                            elif ext == 'pdf':
+                                import PyPDF2
+                                with open(full_path, 'rb') as file:
+                                    reader = PyPDF2.PdfReader(file)
+                                    for page in reader.pages:
+                                        text = page.extract_text()
+                                        if text and self.query in text.lower():
+                                            match = True
+                                            break
+
+                            # --- DOCX FILE ---
+                            elif ext == 'docx':
+                                import docx
+                                doc = docx.Document(full_path)
+                                for para in doc.paragraphs:
+                                    if self.query in para.text.lower():
+                                        match = True
+                                        break
+
+                            # ❌ Ignore other file types (images/videos automatically skipped)
+
+                        except Exception:
+                            pass  # Ignore unreadable files safely
+
+                    # ✅ Emit result if matched
+                    if match:
                         self.match_found.emit(f, full_path, False)
                         matches_found += 1
-                        if matches_found >= self.limit: break
+                        if matches_found >= self.limit:
+                            break
 
-                if matches_found >= self.limit or not self.is_running: break
-                
+                if matches_found >= self.limit or not self.is_running:
+                    break
+
         except Exception as e:
             print(f"Background search error: {e}")
+
         finally:
             self.search_finished.emit(matches_found)
 
@@ -60,6 +114,7 @@ class SearchWorker(QThread):
 
 class FileTableWidget(QWidget):
     folder_opened = pyqtSignal(str)
+    share_requested = pyqtSignal(str) # <--- NEW: Signal to trigger the share dialog
 
     def __init__(self):
         super().__init__()
@@ -246,8 +301,8 @@ class FileTableWidget(QWidget):
     def perform_action(self, action_name):
         selected_files = self.get_selected_files()
         
-        # Debug print to verify selection works
-        # print(f"Action: {action_name}, Files: {selected_files}")
+        # Normalize action name to lowercase to ensure both top bar and context menu trigger correctly
+        action_name = action_name.lower() #
         
         if action_name == "new":
             self.create_new_folder()
@@ -277,8 +332,18 @@ class FileTableWidget(QWidget):
         elif action_name == "paste":
             self.paste_items()
             
-        elif action_name == "share":
-            pass
+        elif action_name == "share": #
+            # --- FIXED: Gets the selected file and emits the signal to main.py ---
+            if not selected_files:
+                QMessageBox.warning(self, "Share", "Please select a file to share.")
+                return
+            if len(selected_files) > 1:
+                QMessageBox.warning(self, "Share", "Please select exactly one file to share.")
+                return
+            
+            # This triggers the popup in main.py automatically!
+            self.share_requested.emit(selected_files[0]) #
+            # ---------------------------------------------------------------------
 
     def create_new_folder(self):
         name, ok = QInputDialog.getText(self, "New Folder", "Folder Name:")

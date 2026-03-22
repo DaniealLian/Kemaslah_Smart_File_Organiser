@@ -113,6 +113,67 @@ def is_valid_email(email):
 def is_strong_password(password):
     return re.match(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{10,}$', password) is not None
 
+
+# --- NEW: WHAT'S NEW PAGE (Auth-Style Card) ---
+# COMMENTED OUT TO KEEP CODE SAFE BUT REMOVE FROM UI
+# class WhatsNewPage(QWidget):
+#     def __init__(self, parent_stack):
+#         super().__init__()
+#         self.stack = parent_stack
+#         layout = QVBoxLayout(self)
+#         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+#
+#         card = QFrame()
+#         card.setFixedSize(450, 600)
+#         card.setStyleSheet(CARD_STYLE)
+#         card_layout = QVBoxLayout(card)
+#         card_layout.setContentsMargins(45, 40, 45, 40)
+#
+#         self.title_label = QLabel("What's New")
+#         self.title_label.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
+#         self.title_label.setStyleSheet("color: white;")
+#
+#         self.subtitle_label = QLabel("Latest updates and features in Kemaslah")
+#         self.subtitle_label.setStyleSheet("color: #718096; font-size: 12px;")
+#
+#         self.original_news_text = (
+#             "🚀 Version 1.1.0\n\n"
+#             "✨ New Features:\n"
+#             "• Added seamless Google Sign-In integration.\n"
+#             "• Multi-language support (English, Malay, Chinese, Tamil).\n"
+#             "• Guest Mode for quick access.\n\n"
+#             "🛠️ Improvements:\n"
+#             "• Modular UI architecture for better performance.\n"
+#             "• Stronger password validation & secure OTP reset.\n"
+#             "• Improved database stability & collision handling."
+#         )
+#         self.news_text = QLabel(self.original_news_text)
+#         self.news_text.setStyleSheet("color: #CBD5E0; font-size: 13px; line-height: 1.6;")
+#         self.news_text.setWordWrap(True)
+#         self.news_text.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+#
+#         self.back_btn = QPushButton("Back to Login")
+#         self.back_btn.setFixedHeight(45)
+#         self.back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+#         self.back_btn.setStyleSheet("QPushButton { background-color: #0D3B66; color: white; border-radius: 22px; font-weight: bold; margin-top: 20px; }")
+#         self.back_btn.clicked.connect(lambda: self.stack.setCurrentIndex(0))
+#
+#         card_layout.addWidget(self.title_label, alignment=Qt.AlignmentFlag.AlignCenter)
+#         card_layout.addWidget(self.subtitle_label, alignment=Qt.AlignmentFlag.AlignCenter)
+#         card_layout.addSpacing(20)
+#         card_layout.addWidget(self.news_text)
+#         card_layout.addStretch()
+#         card_layout.addWidget(self.back_btn)
+#         
+#         layout.addWidget(card)
+#
+#     def update_translations(self, lang_code):
+#         self.title_label.setText(translate_text("What's New", lang_code))
+#         self.subtitle_label.setText(translate_text("Latest updates and features in Kemaslah", lang_code))
+#         self.news_text.setText(translate_text(self.original_news_text, lang_code))
+#         self.back_btn.setText(translate_text("Back to Login", lang_code))
+
+
 # --- LOGIN PAGE ---
 class LoginPage(QWidget):
     login_successful = pyqtSignal(dict)  # Signal for successful login
@@ -125,11 +186,14 @@ class LoginPage(QWidget):
         self.language_page = language_page
         self.current_lang = "en"
         
-        # --- NEW: Google Login Timer ---
+        # --- NEW: Google Login Timer with Timeout ---
         self.poll_timer = QTimer()
-        self.poll_timer.interval = 1000 # Check every 1 second
+        self.poll_timer.setInterval(1000) # FIX: Properly set the Qt timer interval
         self.poll_timer.timeout.connect(self.check_google_status)
         self.current_state_id = None
+        self.poll_attempts = 0       # Tracks seconds passed
+        self.max_attempts = 60      # FIX: Increased to 60 seconds (1 minute) to allow for 2FA approvals
+        # ------------------------------------------
         
         layout = QVBoxLayout(self); layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.basedir = os.path.dirname(__file__)
@@ -172,10 +236,10 @@ class LoginPage(QWidget):
             self.google_btn.setIcon(QIcon(google_icon_path)); self.google_btn.setIconSize(QSize(18, 18))
         self.google_btn.setFixedHeight(45)
         self.google_btn.setStyleSheet("QPushButton { background-color: white; color: #2D3748; border-radius: 22px; font-weight: bold; margin-top: 10px; }")
-        # --- NEW: Connect Google Button ---
+        # --- Connect Google Button ---
         self.google_btn.clicked.connect(self.handle_google_login)
 
-        # --- NEW: Skip Login Button (Guest Mode) ---
+        # --- Skip Login Button (Guest Mode) ---
         self.skip_btn = QPushButton("Continue as Guest")
         self.skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.skip_btn.setFixedHeight(40)
@@ -197,9 +261,15 @@ class LoginPage(QWidget):
         self.skip_btn.clicked.connect(self.skip_login_clicked.emit)
 
         self.go_reg = QPushButton("Don't have an account? Register here")
-        self.go_reg.setStyleSheet("color: #3182CE; border: none; font-size: 11px; background: transparent;")
+        self.go_reg.setStyleSheet("color: #3182CE; border: none; font-size: 11px; background: transparent; margin-top: 5px;")
         self.go_reg.setCursor(Qt.CursorShape.PointingHandCursor)
         self.go_reg.clicked.connect(lambda: self.stack.setCurrentIndex(1))
+
+        # --- NEW: WHAT'S NEW LINK (COMMENTED OUT) ---
+        # self.whats_new_link = QPushButton("What's new in this version?")
+        # self.whats_new_link.setStyleSheet("color: #0F8E52; border: none; font-size: 11px; background: transparent; margin-top: 5px;")
+        # self.whats_new_link.setCursor(Qt.CursorShape.PointingHandCursor)
+        # self.whats_new_link.clicked.connect(lambda: self.stack.setCurrentIndex(4)) # Goes to index 4
 
         card_layout.addWidget(self.title_label, alignment=Qt.AlignmentFlag.AlignCenter)
         card_layout.addWidget(self.subtitle_label, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -208,6 +278,7 @@ class LoginPage(QWidget):
         card_layout.addStretch(); card_layout.addWidget(self.login_btn); card_layout.addWidget(self.google_btn)
         card_layout.addWidget(self.skip_btn)  # Add skip button
         card_layout.addWidget(self.go_reg)
+        # card_layout.addWidget(self.whats_new_link) # Add what's new link
         layout.addWidget(card)
 
     def update_translations(self, lang_code):
@@ -221,6 +292,7 @@ class LoginPage(QWidget):
         self.google_btn.setText(translate_text(" Continue with Google", lang_code))
         self.skip_btn.setText(translate_text("Continue as Guest", lang_code))
         self.go_reg.setText(translate_text("Don't have an account? Register here", lang_code))
+        # self.whats_new_link.setText(translate_text("What's new in this version?", lang_code))
 
     def toggle_password(self, line_edit, btn):
         if line_edit.echoMode() == QLineEdit.EchoMode.Password: line_edit.setEchoMode(QLineEdit.EchoMode.Normal); self.update_eye_icon(btn, False)
@@ -234,7 +306,7 @@ class LoginPage(QWidget):
         self.email_input.setText("")
         self.pass_input.setText("")
 
-    # --- NEW: GOOGLE LOGIN LOGIC ---
+    # --- GOOGLE LOGIN LOGIC ---
     
     def handle_google_login(self):
         """Step 1: Open Browser and start polling DB"""
@@ -244,21 +316,25 @@ class LoginPage(QWidget):
         url = f"http://127.0.0.1:5000/login/google?state_id={self.current_state_id}"
         QDesktopServices.openUrl(QUrl(url))
         
-        # UI Feedback
+        # Reset attempts and update UI Feedback
+        self.poll_attempts = 0
         self.google_btn.setEnabled(False)
-        self.google_btn.setText("Waiting for browser...")
+        self.google_btn.setText(f"Waiting for browser... ({self.max_attempts}s)")
         
-        # Start checking DB every 1 second
-        self.poll_timer.start()
+        # Start checking DB every 1 second (1000 milliseconds)
+        self.poll_timer.start(1000) # FIX: Explicitly tell Qt to wait exactly 1000ms before ticking
 
     def check_google_status(self):
-        """Step 2: Check if browser login finished"""
+        """Step 2: Check if browser login finished or timed out"""
         if not self.current_state_id: return
+        
+        self.poll_attempts += 1
         
         # Ask DB: "Did user finish?"
         user_email = check_login_status(self.current_state_id)
         
         if user_email:
+            # SUCCESS!
             self.poll_timer.stop()
             self.google_btn.setEnabled(True)
             self.google_btn.setText(" Continue with Google")
@@ -272,6 +348,18 @@ class LoginPage(QWidget):
                 self.login_successful.emit(user_dict) 
             else:
                 QMessageBox.critical(self, "Error", "Failed to retrieve user data.")
+                
+        elif self.poll_attempts >= self.max_attempts:
+            # TIMEOUT! 120 seconds passed
+            self.poll_timer.stop()
+            self.google_btn.setEnabled(True)
+            self.google_btn.setText(" Continue with Google")
+            QMessageBox.warning(self, "Login Timeout", "The Google login request timed out because no account was selected.\n\nPlease try again.")
+            
+        else:
+            # STILL WAITING: Update the countdown text
+            seconds_left = self.max_attempts - self.poll_attempts
+            self.google_btn.setText(f"Waiting for browser... ({seconds_left}s)")
 
     def fetch_google_user_data(self, email):
         """Helper to get user data without password (trusted from Google)"""
@@ -428,13 +516,13 @@ class ResetPasswordPage(QWidget):
 
         p_cont = QWidget(); p_cont.setStyleSheet(FIELD_CONTAINER_STYLE); p_lay = QHBoxLayout(p_cont); p_lay.setContentsMargins(0,0,0,0)
         self.p_in = QLineEdit(); self.p_in.setPlaceholderText("New Password"); self.p_in.setEchoMode(QLineEdit.EchoMode.Password); self.p_in.setStyleSheet(INPUT_STYLE)
-        self.p_t = QPushButton(); self.p_t.setFixedSize(30, 30); self.p_t.setStyleSheet(TOGGLE_BTN_STYLE); self.p_t.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.p_t = QPushButton(); self.p_t.setFixedSize(30, 30); self.p_t.setStyleSheet("QPushButton { background: transparent; border: none; padding: 0px; }"); self.p_t.setCursor(Qt.CursorShape.PointingHandCursor)
         self.update_eye_icon(self.p_t, True); self.p_t.clicked.connect(lambda: self.toggle_password(self.p_in, self.p_t))
         p_lay.addWidget(self.p_in); p_lay.addWidget(self.p_t)
 
         rp_cont = QWidget(); rp_cont.setStyleSheet(FIELD_CONTAINER_STYLE); rp_lay = QHBoxLayout(rp_cont); rp_lay.setContentsMargins(0,0,0,0)
         self.rp_in = QLineEdit(); self.rp_in.setPlaceholderText("Re-enter New Password"); self.rp_in.setEchoMode(QLineEdit.EchoMode.Password); self.rp_in.setStyleSheet(INPUT_STYLE)
-        self.rp_t = QPushButton(); self.rp_t.setFixedSize(30, 30); self.rp_t.setStyleSheet(TOGGLE_BTN_STYLE); self.rp_t.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.rp_t = QPushButton(); self.rp_t.setFixedSize(30, 30); self.rp_t.setStyleSheet("QPushButton { background: transparent; border: none; padding: 0px; }"); self.rp_t.setCursor(Qt.CursorShape.PointingHandCursor)
         self.update_eye_icon(self.rp_t, True); self.rp_t.clicked.connect(lambda: self.toggle_password(self.rp_in, self.rp_t))
         rp_lay.addWidget(self.rp_in); rp_lay.addWidget(self.rp_t)
 
@@ -499,13 +587,13 @@ class RegisterPage(QWidget):
 
         p_cont = QWidget(); p_cont.setStyleSheet(FIELD_CONTAINER_STYLE); p_lay = QHBoxLayout(p_cont); p_lay.setContentsMargins(0,0,0,0)
         self.p_in = QLineEdit(); self.p_in.setPlaceholderText("Password"); self.p_in.setEchoMode(QLineEdit.EchoMode.Password); self.p_in.setStyleSheet(INPUT_STYLE)
-        self.p_t = QPushButton(); self.p_t.setFixedSize(30, 30); self.p_t.setStyleSheet(TOGGLE_BTN_STYLE); self.p_t.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.p_t = QPushButton(); self.p_t.setFixedSize(30, 30); self.p_t.setStyleSheet("QPushButton { background: transparent; border: none; padding: 0px; }"); self.p_t.setCursor(Qt.CursorShape.PointingHandCursor)
         self.update_eye_icon(self.p_t, True); self.p_t.clicked.connect(lambda: self.toggle_password(self.p_in, self.p_t))
         p_lay.addWidget(self.p_in); p_lay.addWidget(self.p_t)
 
         rp_cont = QWidget(); rp_cont.setStyleSheet(FIELD_CONTAINER_STYLE); rp_lay = QHBoxLayout(rp_cont); rp_lay.setContentsMargins(0,0,0,0)
         self.rp_in = QLineEdit(); self.rp_in.setPlaceholderText("Re-enter Password"); self.rp_in.setEchoMode(QLineEdit.EchoMode.Password); self.rp_in.setStyleSheet(INPUT_STYLE)
-        self.rp_t = QPushButton(); self.rp_t.setFixedSize(30, 30); self.rp_t.setStyleSheet(TOGGLE_BTN_STYLE); self.rp_t.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.rp_t = QPushButton(); self.rp_t.setFixedSize(30, 30); self.rp_t.setStyleSheet("QPushButton { background: transparent; border: none; padding: 0px; }"); self.rp_t.setCursor(Qt.CursorShape.PointingHandCursor)
         self.update_eye_icon(self.rp_t, True); self.rp_t.clicked.connect(lambda: self.toggle_password(self.rp_in, self.rp_t))
         rp_lay.addWidget(self.rp_in); rp_lay.addWidget(self.rp_t)
 
@@ -801,10 +889,14 @@ class MainWindow(QWidget):
         self.forgot_page = ForgotPasswordPage(self.stack)
         self.reset_page = ResetPasswordPage(self.stack)
         
-        self.stack.addWidget(self.login_page)     # Index 0
-        self.stack.addWidget(self.register_page)  # Index 1
-        self.stack.addWidget(self.forgot_page)    # Index 2
-        self.stack.addWidget(self.reset_page)     # Index 3
+        # COMMENTED OUT TO KEEP CODE SAFE
+        # self.whats_new_page = WhatsNewPage(self.stack) # NEW: Instantiate What's New Page
+        
+        self.stack.addWidget(self.login_page)       # Index 0
+        self.stack.addWidget(self.register_page)    # Index 1
+        self.stack.addWidget(self.forgot_page)      # Index 2
+        self.stack.addWidget(self.reset_page)       # Index 3
+        # self.stack.addWidget(self.whats_new_page)   # Index 4
         
         layout = QVBoxLayout(self)
         layout.addWidget(self.stack)
