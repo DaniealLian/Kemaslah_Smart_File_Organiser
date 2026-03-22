@@ -1,14 +1,120 @@
 import os
 import shutil
 import datetime
+from send2trash import send2trash # <--- NEW: Import the trash library
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QCheckBox, QTableWidget, 
                              QTableWidgetItem, QHBoxLayout, QHeaderView, 
-                             QFileIconProvider, QInputDialog, QMessageBox, QAbstractItemView)
-from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import Qt, pyqtSignal, QFileInfo, QSize
+                             QFileIconProvider, QInputDialog, QMessageBox, QAbstractItemView, QMenu)
+from PyQt6.QtGui import QIcon, QAction
+from PyQt6.QtCore import Qt, pyqtSignal, QFileInfo, QSize, QThread
+
+class SearchWorker(QThread):
+    # This signal sends the data back to the main UI safely: (name, full_path, is_dir)
+    match_found = pyqtSignal(str, str, bool)
+    search_finished = pyqtSignal(int)
+
+    def __init__(self, query, start_path, limit=100):
+        super().__init__()
+        self.query = query.lower()  # ✅ ensure lowercase once
+        self.start_path = start_path
+        self.limit = limit
+        self.is_running = True
+
+    def run(self):
+        """This runs completely in the background"""
+        matches_found = 0
+
+        try:
+            for root, dirs, files in os.walk(self.start_path):
+                if not self.is_running:
+                    break
+
+                # 1. Search Folders (unchanged)
+                for d in dirs:
+                    if not self.is_running:
+                        break
+                    if self.query in d.lower():
+                        full_path = os.path.join(root, d)
+                        self.match_found.emit(d, full_path, True)
+                        matches_found += 1
+                        if matches_found >= self.limit:
+                            break
+
+                if matches_found >= self.limit or not self.is_running:
+                    break
+
+                # 2. Search Files (UPDATED: filename + content)
+                for f in files:
+                    if not self.is_running:
+                        break
+
+                    full_path = os.path.join(root, f)
+                    match = False
+
+                    # ✅ A. Search filename
+                    if self.query in f.lower():
+                        match = True
+
+                    # ✅ B. Search file content (NEW)
+                    else:
+                        try:
+                            ext = f.split('.')[-1].lower()
+
+                            # --- TEXT FILES ---
+                            if ext in ['txt', 'csv', 'json']:
+                                with open(full_path, 'r', errors='ignore') as file:
+                                    content = file.read().lower()
+                                    if self.query in content:
+                                        match = True
+
+                            # --- PDF FILE ---
+                            elif ext == 'pdf':
+                                import PyPDF2
+                                with open(full_path, 'rb') as file:
+                                    reader = PyPDF2.PdfReader(file)
+                                    for page in reader.pages:
+                                        text = page.extract_text()
+                                        if text and self.query in text.lower():
+                                            match = True
+                                            break
+
+                            # --- DOCX FILE ---
+                            elif ext == 'docx':
+                                import docx
+                                doc = docx.Document(full_path)
+                                for para in doc.paragraphs:
+                                    if self.query in para.text.lower():
+                                        match = True
+                                        break
+
+                            # ❌ Ignore other file types (images/videos automatically skipped)
+
+                        except Exception:
+                            pass  # Ignore unreadable files safely
+
+                    # ✅ Emit result if matched
+                    if match:
+                        self.match_found.emit(f, full_path, False)
+                        matches_found += 1
+                        if matches_found >= self.limit:
+                            break
+
+                if matches_found >= self.limit or not self.is_running:
+                    break
+
+        except Exception as e:
+            print(f"Background search error: {e}")
+
+        finally:
+            self.search_finished.emit(matches_found)
+
+    def stop(self):
+        """Safely stops the background process"""
+        self.is_running = False
 
 class FileTableWidget(QWidget):
     folder_opened = pyqtSignal(str)
+    share_requested = pyqtSignal(str) # <--- NEW: Signal to trigger the share dialog
 
     def __init__(self):
         super().__init__()
@@ -17,8 +123,9 @@ class FileTableWidget(QWidget):
         
         # Internal Clipboard
         self.clipboard_files = [] 
-        self.clipboard_action = None # 'copy' or 'cut'
-        
+        self.clipboard_action = None
+
+        self.search_worker = None
         self.init_ui()
         
     def init_ui(self):
@@ -89,6 +196,9 @@ class FileTableWidget(QWidget):
                 outline: none;
             }
         """)
+
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_context_menu)
         
         # Header Sizing
         header = self.table.horizontalHeader()
@@ -191,8 +301,8 @@ class FileTableWidget(QWidget):
     def perform_action(self, action_name):
         selected_files = self.get_selected_files()
         
-        # Debug print to verify selection works
-        # print(f"Action: {action_name}, Files: {selected_files}")
+        # Normalize action name to lowercase to ensure both top bar and context menu trigger correctly
+        action_name = action_name.lower() #
         
         if action_name == "new":
             self.create_new_folder()
@@ -222,8 +332,18 @@ class FileTableWidget(QWidget):
         elif action_name == "paste":
             self.paste_items()
             
-        elif action_name == "share":
-            pass
+        elif action_name == "share": #
+            # --- FIXED: Gets the selected file and emits the signal to main.py ---
+            if not selected_files:
+                QMessageBox.warning(self, "Share", "Please select a file to share.")
+                return
+            if len(selected_files) > 1:
+                QMessageBox.warning(self, "Share", "Please select exactly one file to share.")
+                return
+            
+            # This triggers the popup in main.py automatically!
+            self.share_requested.emit(selected_files[0]) #
+            # ---------------------------------------------------------------------
 
     def create_new_folder(self):
         name, ok = QInputDialog.getText(self, "New Folder", "Folder Name:")
@@ -246,10 +366,11 @@ class FileTableWidget(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Could not rename:\n{str(e)}")
 
-    def delete_items(self, paths):
-        text = f"Are you sure you want to delete {len(paths)} items?"
+    def delete_items(self, paths):  
+        # Updated text to clarify it goes to the Recycle Bin
+        text = f"Are you sure you want to move {len(paths)} items to the Recycle Bin?"
         if len(paths) == 1:
-            text = f"Are you sure you want to delete '{os.path.basename(paths[0])}'?"
+            text = f"Are you sure you want to move '{os.path.basename(paths[0])}' to the Recycle Bin?"
             
         reply = QMessageBox.question(self, "Delete", text,
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -257,13 +378,9 @@ class FileTableWidget(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             for path in paths:
                 try:
-                    if os.path.isdir(path):
-                        # Force delete directory
-                        shutil.rmtree(path)
-                    else:
-                        os.remove(path)
+                    send2trash(path)
                 except Exception as e:
-                    QMessageBox.warning(self, "Error", f"Could not delete {os.path.basename(path)}:\n{e}")
+                    QMessageBox.warning(self, "Error", f"Could not move {os.path.basename(path)} to trash:\n{e}")
             self.load_files(self.current_path)
 
     def paste_items(self):
@@ -322,3 +439,145 @@ class FileTableWidget(QWidget):
                 os.startfile(full_path)
             except Exception as e:
                 print(f"Error opening file: {e}")
+    
+    def show_context_menu(self, position):
+        # 1. Check if a specific item was clicked
+        item = self.table.itemAt(position)
+        has_selection = item is not None
+
+        # 2. Create the Menu
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #2D3748;
+                color: #E0E0E0;
+                border: 1px solid #4A5568;
+                border-radius: 5px;
+                padding: 5px;
+            }
+            QMenu::item {
+                padding: 6px 25px 6px 20px;
+                border-radius: 3px;
+            }
+            QMenu::item:selected {
+                background-color: #2563EB;
+                color: white;
+            }
+            QMenu::item:disabled {
+                color: #718096;
+            }
+        """)
+
+        # 3. Create Actions matching the ActionBar
+        action_new = QAction("➕ New", self)
+        action_cut = QAction("✂ Cut", self)
+        action_copy = QAction("📋 Copy", self)
+        action_paste = QAction("📄 Paste", self)
+        action_rename = QAction("✏ Rename", self)
+        action_share = QAction("⤴ Share", self)
+        action_delete = QAction("🗑 Delete", self)
+
+        # 4. Disable actions that require a file to be selected if clicking empty space
+        if not has_selection:
+            action_cut.setEnabled(False)
+            action_copy.setEnabled(False)
+            action_rename.setEnabled(False)
+            action_share.setEnabled(False)
+            action_delete.setEnabled(False)
+
+        # 5. Disable Paste if clipboard is empty
+        if not self.clipboard_files:
+            action_paste.setEnabled(False)
+
+        # 6. Add Actions to Menu
+        menu.addAction(action_new)
+        menu.addSeparator() # Adds a nice visual line
+        menu.addAction(action_cut)
+        menu.addAction(action_copy)
+        menu.addAction(action_paste)
+        menu.addSeparator()
+        menu.addAction(action_rename)
+        menu.addAction(action_share)
+        menu.addSeparator()
+        menu.addAction(action_delete)
+
+        # 7. Show the menu and capture the user's choice
+        action = menu.exec(self.table.viewport().mapToGlobal(position))
+
+        # 8. Route the choice to your existing logic
+        if action == action_new: self.perform_action("new")
+        elif action == action_cut: self.perform_action("cut")
+        elif action == action_copy: self.perform_action("copy")
+        elif action == action_paste: self.perform_action("paste")
+        elif action == action_rename: self.perform_action("rename")
+        elif action == action_share: self.perform_action("share")
+        elif action == action_delete: self.perform_action("delete")
+
+    def filter_files(self, query):
+        """Starts the background thread to search recursively without freezing"""
+        query = query.lower().strip()
+        
+        # 1. If a search is already running, cancel it
+        if self.search_worker and self.search_worker.isRunning():
+            self.search_worker.stop()
+            self.search_worker.wait() # Wait for it to safely terminate
+
+        # 2. If search box is empty, load normal folder
+        if not query:
+            self.load_files(self.current_path)
+            return
+
+        # 3. Prepare the UI
+        self.table.setRowCount(0)
+        self.select_all_cb.setChecked(False)
+        
+        # 4. Start the Background Search
+        self.search_worker = SearchWorker(query, self.current_path, limit=100)
+        
+        # Connect the worker's signal directly to your existing row builder!
+        self.search_worker.match_found.connect(self._add_search_row)
+        
+        # Optional: Do something when finished (like show a message if 0 matches)
+        self.search_worker.search_finished.connect(lambda count: print(f"Found {count}"))
+        
+        self.search_worker.start()
+
+    def _add_search_row(self, name, full_path, is_dir):
+        """Helper method to format and insert search results into the table"""
+        try:
+            stat_info = os.stat(full_path)
+        except Exception:
+            return # Skip if the file is locked by Windows or requires admin rights
+            
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        
+        # 1. Name & Tooltip (Hover to see where the file actually lives!)
+        name_item = QTableWidgetItem(name)
+        name_item.setData(Qt.ItemDataRole.UserRole, is_dir)
+        name_item.setData(Qt.ItemDataRole.UserRole + 1, full_path)
+        name_item.setToolTip(full_path) # Very helpful for recursive searches
+        
+        file_info = QFileInfo(full_path)
+        name_item.setIcon(self.icon_provider.icon(file_info))
+        self.table.setItem(row, 0, name_item)
+        
+        # 2. Date
+        mod_time = datetime.datetime.fromtimestamp(stat_info.st_mtime)
+        self.table.setItem(row, 1, QTableWidgetItem(mod_time.strftime("%d/%m/%Y")))
+        
+        # 3. Type
+        type_str = "File Folder" if is_dir else "File"
+        if not is_dir and '.' in name:
+            type_str = name.split('.')[-1].upper() + " File"
+        self.table.setItem(row, 2, QTableWidgetItem(type_str))
+        
+        # 4. Size
+        size_str = "-"
+        if not is_dir:
+            s = stat_info.st_size
+            if s > 1024**3: size_str = f"{s/(1024**3):.1f} GB"
+            elif s > 1024**2: size_str = f"{s/(1024**2):.1f} MB"
+            elif s > 1024: size_str = f"{s/1024:.0f} KB"
+            else: size_str = f"{s} B"
+        self.table.setItem(row, 3, QTableWidgetItem(size_str))

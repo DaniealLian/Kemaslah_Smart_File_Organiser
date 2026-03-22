@@ -1,12 +1,15 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSizePolicy
 from PyQt6.QtCharts import QChart, QChartView, QPieSeries, QPieSlice
 from PyQt6.QtGui import QColor, QPainter, QFont
-from PyQt6.QtCore import QMargins  # Ensure this is imported
+from PyQt6.QtCore import QMargins 
+
+from auth.authentication_page import translate_text # NEW: Import translation
 
 class PieChartWidget(QWidget):
     def __init__(self, title, data):
         super().__init__()
-        # 1. Force a large height so charts are identical and big
+        self.base_title = title
+        self.legend_labels = [] # NEW: Store legend labels for translation
         self.setMinimumHeight(500)
         self.init_ui(title, data)
         
@@ -14,13 +17,12 @@ class PieChartWidget(QWidget):
         layout = QVBoxLayout()
         layout.setContentsMargins(20, 15, 20, 15)
         
-        title_label = QLabel(title)
-        title_label.setStyleSheet("color: #E0E0E0; font-size: 14px; font-weight: bold;")
-        layout.addWidget(title_label)
+        self.title_label = QLabel(title) # CHANGED: Added self.
+        self.title_label.setStyleSheet("color: #E0E0E0; font-size: 14px; font-weight: bold;")
+        layout.addWidget(self.title_label)
         
         # Create pie chart
         series = QPieSeries()
-        # 2. Reduce pie size slightly (0.7) to give labels more room to float outside
         series.setPieSize(0.7) 
         
         colors = ["#D946EF", "#06B6D4", "#22D3EE", "#8B5CF6"]
@@ -29,25 +31,20 @@ class PieChartWidget(QWidget):
             slice_item = series.append(label, value)
             slice_item.setColor(QColor(colors[i % len(colors)]))
 
-            # 3. Label Settings
+            # Label Settings
             slice_item.setLabelVisible(True)
             slice_item.setLabel(f"{int(value)}%")
             slice_item.setLabelBrush(QColor("white"))
             
-            # Make text bold/larger
             f = QFont("Arial", 10)
             f.setBold(True)
             slice_item.setLabelFont(f)
-            
-            # Force labels outside
             slice_item.setLabelPosition(QPieSlice.LabelPosition.LabelOutside)
         
         chart = QChart()
         chart.addSeries(series)
         chart.setAnimationOptions(QChart.AnimationOption.SeriesAnimations)
         chart.setBackgroundBrush(QColor("#2D3748"))
-        
-        # 4. Remove whitespace margins
         chart.setMargins(QMargins(0, 0, 0, 0))
         chart.legend().setVisible(False)
         
@@ -72,6 +69,9 @@ class PieChartWidget(QWidget):
             label_widget = QLabel(label)
             label_widget.setStyleSheet("color: #C0C0C0; font-size: 11px;")
             
+            # NEW: Store the original text and label reference
+            self.legend_labels.append((label, label_widget)) 
+            
             legend_item.addWidget(color_box)
             legend_item.addWidget(label_widget)
             legend_item.addStretch()
@@ -80,3 +80,17 @@ class PieChartWidget(QWidget):
         
         layout.addLayout(legend_layout)
         self.setLayout(layout)
+
+    # --- NEW: Translation Method ---
+    def update_translations(self, lang_code):
+        self.title_label.setText(translate_text(self.base_title, lang_code))
+        
+        # Translate the legend (splitting by \n to preserve the file counts like "(15)")
+        for base_text, label_widget in self.legend_labels:
+            parts = base_text.split('\n')
+            if len(parts) == 2:
+                word, count = parts[0], parts[1]
+                translated_word = translate_text(word, lang_code)
+                label_widget.setText(f"{translated_word}\n{count}")
+            else:
+                label_widget.setText(translate_text(base_text, lang_code))
