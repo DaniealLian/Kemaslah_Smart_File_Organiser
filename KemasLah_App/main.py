@@ -48,9 +48,24 @@ from src.gui.views.share_dialog import ShareFileDialog
 from src.gui.views.file_sharing_view import FileSharingView
 # ----------------------------------------------------------
 
+#import to add cnn model
+from pathlib import Path
+from src.inference.classifier_worker import (
+    CNNSearchWorker, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+)
+
+CNN_MODEL_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "models", "trained", "best_model.pth"
+)
+ 
+# Convenience sets — used throughout handle_smart_organise
+_MEDIA_EXTS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS   # {'.jpg', '.mp4', ...}
+
+
 class SmartFileManager(QMainWindow):
     """Enterprise File Manager: Absolute Keyword Search & Anti-Silent-Fail Logging"""
-    logout_requested = pyqtSignal()  
+    logout_requested = pyqtSignal()
     
     def __init__(self, user_data=None, auth_window=None):  
         super().__init__()
@@ -64,6 +79,8 @@ class SmartFileManager(QMainWindow):
         self.search_timer.setSingleShot(True)
         self.search_timer.timeout.connect(self.perform_search)
         self.current_search_query = ""
+        self._image_classifier  = None   # lazy-loaded ImageClassifier (CNN)
+        self._cnn_search_worker = None   # background CNNSearchWorker thread
         
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -146,389 +163,531 @@ class SmartFileManager(QMainWindow):
         self.perform_ai_deep_search(query)
 
     def perform_ai_deep_search(self, ai_query):
-        """Scans document contents with Explicit Error Reporting."""
-        query_lower = ai_query.lower()
+        """
+        Deep content search — text documents (TF-IDF) + images/videos (CNN).
+        """
+        query_lower  = ai_query.lower()
         current_path = self.files_view.current_path
-        if not os.path.exists(current_path): return
-
-        files_in_dir = [os.path.join(current_path, f) for f in os.listdir(current_path) if os.path.isfile(os.path.join(current_path, f))]
-        
-        if not files_in_dir:
-            QMessageBox.information(self, "Content Scanner", f"There are no files inside the folder '{os.path.basename(current_path)}' to scan.\n\nPlease navigate to the exact folder where your text file is saved!")
+        if not os.path.exists(current_path):
             return
-
-        progress = QProgressDialog(f"Deep scanning inside {len(files_in_dir)} documents...", "Cancel", 0, len(files_in_dir), self)
-        progress.setMinimumDuration(500) 
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-
-        def quick_content_extract(filepath):
-            ext = filepath.lower().split('.')[-1] if '.' in filepath else ''
-            raw_text = ""
-            try:
-                if ext == 'pdf':
-                    with open(filepath, 'rb') as f:
-                        reader = PyPDF2.PdfReader(f)
-                        for i in range(min(5, len(reader.pages))):
-                            page_text = reader.pages[i].extract_text()
-                            if page_text: raw_text += page_text + " "
-                elif ext == 'docx':
-                    doc = docx.Document(filepath)
-                    for para in doc.paragraphs[:50]: raw_text += para.text + " " 
-                elif ext in ['txt', 'md', 'csv', 'py', 'json']:
-                    with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                        raw_text = f.read(10000) 
-            except Exception as read_err: 
-                # UX FIX: Print exact read errors to console instead of silent pass
-                print(f"Error reading file {filepath}: {read_err}")
-                pass
-            
-            return raw_text.lower()
-
-        docs = []
-        valid_files = []
-        for i, fp in enumerate(files_in_dir):
-            if progress.wasCanceled(): break
-            content = quick_content_extract(fp)
-            if content.strip():
-                docs.append(content)
-                valid_files.append(fp)
-            progress.setValue(i + 1); QApplication.processEvents()
-        progress.close()
-
-        if not valid_files:
-            QMessageBox.information(self, "Content Scanner", f"Scanned {len(files_in_dir)} files, but none contained readable text.\n\nMake sure your text file was actually saved (Ctrl+S)!")
+    
+        all_files = [
+            os.path.join(current_path, f)
+            for f in os.listdir(current_path)
+            if os.path.isfile(os.path.join(current_path, f))
+        ]
+        if not all_files:
+            QMessageBox.information(
+                self, "Content Scanner",
+                f"No files inside '{os.path.basename(current_path)}' to scan.\n\n"
+                "Navigate to the folder that contains your file.")
             return
-
-        try:
-            found_matches = []
-            
-            # ABSOLUTE BRUTE-FORCE MATCH: Bypasses all AI limits
-            for idx, content in enumerate(docs):
-                if query_lower in content:
-                    found_matches.append((idx, 1.0, "Exact Keyword Match"))
-
-            # Fallback to AI Semantic Match
-            if not found_matches:
-                vectorizer = TfidfVectorizer(token_pattern=r'(?u)\b\w+\b') 
-                tfidf_matrix = vectorizer.fit_transform([query_lower] + docs)
-                cosine_sim = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:]).flatten()
-                
-                top_indices = cosine_sim.argsort()[-5:][::-1] 
-                for idx in top_indices:
-                    if cosine_sim[idx] > 0.001: 
-                        found_matches.append((idx, cosine_sim[idx], "Semantic AI Match"))
-            
-            if not found_matches: 
-                QMessageBox.information(self, "Content Scanner", f"Scanned {len(valid_files)} files in '{os.path.basename(current_path)}'.\n\nCould not find any text matching '{ai_query}'.\n\nAre you 100% sure you moved the file into THIS exact folder?")
+    
+        text_files  = [f for f in all_files
+                    if Path(f).suffix.lower() not in _MEDIA_EXTS]
+        media_files = [f for f in all_files
+                    if Path(f).suffix.lower() in _MEDIA_EXTS]
+    
+        # ── PART A: Text document search (your original logic, unchanged) ─────────
+        if text_files:
+            progress = QProgressDialog(
+                f"Deep scanning {len(text_files)} document(s)…",
+                "Cancel", 0, len(text_files), self)
+            progress.setMinimumDuration(500)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+    
+            def quick_content_extract(filepath):
+                ext      = filepath.lower().split('.')[-1] if '.' in filepath else ''
+                raw_text = ""
+                try:
+                    if ext == 'pdf':
+                        with open(filepath, 'rb') as f:
+                            reader = PyPDF2.PdfReader(f)
+                            for i in range(min(5, len(reader.pages))):
+                                pt = reader.pages[i].extract_text()
+                                if pt:
+                                    raw_text += pt + " "
+                    elif ext == 'docx':
+                        doc = docx.Document(filepath)
+                        for para in doc.paragraphs[:50]:
+                            raw_text += para.text + " "
+                    elif ext in ['txt', 'md', 'csv', 'py', 'json']:
+                        with open(filepath, 'r', encoding='utf-8',
+                                errors='ignore') as f:
+                            raw_text = f.read(10000)
+                except Exception as e:
+                    print(f"Error reading {filepath}: {e}")
+                return raw_text.lower()
+    
+            docs, valid_files = [], []
+            for i, fp in enumerate(text_files):
+                if progress.wasCanceled():
+                    break
+                content = quick_content_extract(fp)
+                if content.strip():
+                    docs.append(content); valid_files.append(fp)
+                progress.setValue(i + 1); QApplication.processEvents()
+            progress.close()
+    
+            if valid_files:
+                try:
+                    found = []
+                    for idx, content in enumerate(docs):
+                        if query_lower in content:
+                            found.append((idx, 1.0, "Exact Keyword Match"))
+    
+                    if not found:
+                        vec_s    = TfidfVectorizer(token_pattern=r'(?u)\b\w+\b')
+                        tfidf_m  = vec_s.fit_transform([query_lower] + docs)
+                        cos_sim  = cosine_similarity(
+                            tfidf_m[0:1], tfidf_m[1:]).flatten()
+                        for idx in cos_sim.argsort()[-5:][::-1]:
+                            if cos_sim[idx] > 0.001:
+                                found.append((idx, cos_sim[idx], "Semantic AI Match"))
+    
+                    if found:
+                        result_msg = f"🔍 Document Matches for: '{ai_query}'\n\n"
+                        for idx, score, match_type in found:
+                            fn  = os.path.basename(valid_files[idx])
+                            sc  = ("100% (Exact)" if match_type == "Exact Keyword Match"
+                                else f"{score:.1%}")
+                            result_msg += (f"📄 {fn}\n"
+                                        f"   • Type  : {match_type}\n"
+                                        f"   • Score : {sc}\n\n")
+                        dialog = QDialog(self)
+                        dialog.setWindowTitle("Document Search Results")
+                        dialog.resize(600, 400)
+                        lay = QVBoxLayout(dialog)
+                        lay.addWidget(QLabel(
+                            f"<b>Top document matches for '{ai_query}':</b>"))
+                        te = QTextEdit(dialog)
+                        te.setReadOnly(True); te.setText(result_msg)
+                        lay.addWidget(te)
+                        btn = QPushButton("Close"); btn.clicked.connect(dialog.accept)
+                        lay.addWidget(btn); dialog.exec()
+    
+                except Exception as e:
+                    if "empty vocabulary" in str(e).lower():
+                        QMessageBox.warning(self, "Search Alert",
+                                            "Query contains invalid characters.")
+                    else:
+                        QMessageBox.critical(self, "Search Error", str(e))
+                        print(f"Deep Search Error: {e}")
+    
+        # ── PART B: CNN image/video search (NEW — background thread) ─────────────
+        if media_files:
+            if not os.path.exists(CNN_MODEL_PATH):
+                print("[CNN Search] best_model.pth not found — skipping image search.")
                 return
-            
-            result_msg = f"🔍 Inside-File Matches for: '{ai_query}'\n\n"
-            for idx, score, match_type in found_matches:
-                file_name = os.path.basename(valid_files[idx])
-                score_txt = "100% (Exact Match)" if match_type == "Exact Keyword Match" else f"{score:.1%}"
-                result_msg += f"📄 {file_name}\n   • Match Type: {match_type}\n   • Relevance: {score_txt}\n\n"
-            
-            dialog = QDialog(self)
-            dialog.setWindowTitle("File Content Search Results")
-            dialog.resize(600, 400)
-            layout = QVBoxLayout(dialog)
-            
-            instruction_lbl = QLabel(f"<b>Top matches based on inside document text for '{ai_query}':</b><br><i>(Note: Files that don't have this word in their title are hidden behind this box)</i>")
-            layout.addWidget(instruction_lbl)
-            
-            text_edit = QTextEdit(dialog)
-            text_edit.setReadOnly(True)
-            text_edit.setText(result_msg)
-            layout.addWidget(text_edit)
-            
-            btn = QPushButton("Close Search Results")
-            btn.clicked.connect(dialog.accept)
-            layout.addWidget(btn)
-            dialog.exec()
-
-        except Exception as e:
-            # UX FIX: Critical Error Reporting
-            if "empty vocabulary" in str(e).lower():
-                 QMessageBox.warning(self, "AI Search Alert", "Search query contains invalid characters.")
-            else:
-                 QMessageBox.critical(self, "System Error", f"The AI encountered an error while scanning the text:\n\n{str(e)}\n\nCheck terminal for details.")
-                 print(f"Deep Search Error: {e}")
+    
+            # Stop any previous search still running
+            if self._cnn_search_worker and self._cnn_search_worker.isRunning():
+                self._cnn_search_worker.stop()
+                self._cnn_search_worker.wait()
+    
+            QMessageBox.information(
+                self, "Image Search Started",
+                f"🖼️  Also scanning {len(media_files)} image/video file(s) by "
+                f"visual content.\n\nMatching results will appear in the "
+                f"file list below as they are found."
+            )
+    
+            self._cnn_search_worker = CNNSearchWorker(
+                query      = ai_query,
+                search_path= current_path,
+                model_path = CNN_MODEL_PATH,
+            )
+            self._cnn_search_worker.match_found.connect(self._on_cnn_image_match)
+            self._cnn_search_worker.search_finished.connect(self._on_cnn_search_done)
+            self._cnn_search_worker.error_occurred.connect(self._on_cnn_search_error)
+            self._cnn_search_worker.start()
 
     # -------------------------------------------------------------------------
     # --- CORE AI LOGIC: Sorting and Organization ---
     # -------------------------------------------------------------------------
     def handle_smart_organise(self):
         current_widget = self.stack.currentWidget()
-        if current_widget != self.files_view: return
-
-        selected_paths = self.files_view.file_table.get_selected_files() 
-        if not selected_paths:
-            QMessageBox.warning(self, "No Selection", "Please select folders or files to organize.")
+        if current_widget != self.files_view:
             return
-
+    
+        selected_paths = self.files_view.file_table.get_selected_files()
+        if not selected_paths:
+            QMessageBox.warning(self, "No Selection",
+                                "Please select folders or files to organize.")
+            return
+    
+        # ── Split selection by type ───────────────────────────────────────────────
+        folders_selected = [p for p in selected_paths if os.path.isdir(p)]
+        files_selected   = [p for p in selected_paths if os.path.isfile(p)]
+    
+        image_files = [f for f in files_selected
+                    if Path(f).suffix.lower() in IMAGE_EXTENSIONS]
+        video_files = [f for f in files_selected
+                    if Path(f).suffix.lower() in VIDEO_EXTENSIONS]
+        text_files  = [f for f in files_selected
+                    if f not in image_files and f not in video_files]
+    
+        move_history      = []
+        results_message   = "🤖 AI Smart Organise Complete!\n\n"
+        metrics_message   = ""
+        current_view_path = self.files_view.current_path
+    
+        # ── Text-content extractor (unchanged from your original) ─────────────────
         def read_ultimate_precision_content(filepath):
             file_name = os.path.basename(filepath)
-            ext = file_name.lower().split('.')[-1] if '.' in file_name else ''
-            
-            clean_name = re.sub(r'[^a-zA-Z\s]', ' ', file_name.replace('_', ' ').replace('-', ' '))
-            content = (clean_name + " ") * 20 
-            
+            ext       = file_name.lower().split('.')[-1] if '.' in file_name else ''
+            clean_name = re.sub(r'[^a-zA-Z\s]', ' ',
+                                file_name.replace('_', ' ').replace('-', ' '))
+            content  = (clean_name + " ") * 20
             raw_text = ""
             try:
                 if ext == 'pdf':
                     with open(filepath, 'rb') as f:
                         reader = PyPDF2.PdfReader(f)
-                        for i in range(min(6, len(reader.pages))): 
+                        for i in range(min(6, len(reader.pages))):
                             page_text = reader.pages[i].extract_text()
                             if page_text:
-                                if i == 0: raw_text += (page_text[:2000] + " ") * 10
+                                if i == 0:
+                                    content += (page_text[:2000] + " ") * 10
                                 raw_text += page_text + " "
                 elif ext == 'docx':
                     doc = docx.Document(filepath)
-                    for para in doc.paragraphs[:40]: raw_text += para.text + " "
+                    for para in doc.paragraphs[:40]:
+                        raw_text += para.text + " "
                 elif ext in ['txt', 'md', 'csv', 'py', 'json']:
                     with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                        raw_text = f.read(15000) 
+                        raw_text = f.read(15000)
             except Exception as e:
                 print(f"Extraction error: {e}")
-
-            raw_text = raw_text.lower()
-            words = re.findall(r'\b[a-z]{3,15}\b', raw_text)
-            stemmed_words = [re.sub(r'(ing|tion|ment|ies|s)$', '', w) for w in words]
-            raw_text = " ".join(stemmed_words)
-            
-            academic_noise = r'\b(chapter|page|university|note|lecture|assignment|pdf|introduction|case|study|faculty|tarc|student|course|module|www|http|com|appendix|reference|conclusion|objective|assessment|rubric|tutorial|practical|guideline|data|result|table)\b'
-            raw_text = re.sub(academic_noise, '', raw_text)
-            
+    
+            raw_text  = raw_text.lower()
+            words     = re.findall(r'\b[a-z]{3,15}\b', raw_text)
+            stemmed   = [re.sub(r'(ing|tion|ment|ies|s)$', '', w) for w in words]
+            raw_text  = " ".join(stemmed)
+            noise_re  = (r'\b(chapter|page|university|note|lecture|assignment|pdf'
+                        r'|introduction|case|study|faculty|tarc|student|course'
+                        r'|module|www|http|com|appendix|reference|conclusion'
+                        r'|objective|assessment|rubric|tutorial|practical'
+                        r'|guideline|data|result|table)\b')
+            raw_text  = re.sub(noise_re, '', raw_text)
             return content + re.sub(r'\s+', ' ', raw_text).strip()
-
-        folders_selected = [p for p in selected_paths if os.path.isdir(p)]
-        files_selected = [p for p in selected_paths if os.path.isfile(p)]
-        
-        move_history = [] 
-        results_message = f"🤖 AI Smart Organise Complete!\n\n"
-        metrics_message = ""
-        current_view_path = self.files_view.current_path
-
+    
         try:
+            # ── BRANCH A: 2+ folders, no files → similarity merge (unchanged) ────
             if len(folders_selected) >= 2 and not files_selected:
-                progress = QProgressDialog("Merging folders...", "Cancel", 0, len(folders_selected), self)
-                progress.setMinimumDuration(0); progress.show(); QApplication.processEvents()
-
+                progress = QProgressDialog("Merging folders…", "Cancel",
+                                        0, len(folders_selected), self)
+                progress.setMinimumDuration(0)
+                progress.show()
+                QApplication.processEvents()
+    
                 folder_profiles, valid_folders = [], []
-                vectorizer = TfidfVectorizer(stop_words='english', max_features=2500, ngram_range=(1, 2), sublinear_tf=True)
-                
+                vec_m = TfidfVectorizer(stop_words='english', max_features=2500,
+                                        ngram_range=(1, 2), sublinear_tf=True)
+    
                 for i, folder in enumerate(folders_selected):
                     folder_name = os.path.basename(folder)
-                    combined_text = (folder_name + " ") * 10 
+                    combined    = (folder_name + " ") * 10
                     for root, dirs, files in os.walk(folder):
                         for file in files:
-                            combined_text += read_ultimate_precision_content(os.path.join(root, file))
-                            if len(combined_text) > 80000: break
-                    
-                    folder_profiles.append(combined_text)
+                            combined += read_ultimate_precision_content(
+                                os.path.join(root, file))
+                            if len(combined) > 80000:
+                                break
+                    folder_profiles.append(combined)
                     valid_folders.append(folder)
-                    progress.setValue(i + 1); QApplication.processEvents()
-                
+                    progress.setValue(i + 1)
+                    QApplication.processEvents()
+    
                 if len(folder_profiles) >= 2:
-                    tfidf_matrix = vectorizer.fit_transform(folder_profiles)
-                    sim_matrix = cosine_similarity(tfidf_matrix)
-                    
+                    tfidf_m = vec_m.fit_transform(folder_profiles)
+                    sim_mat = cosine_similarity(tfidf_m)
                     best_i, best_j, max_sim = 0, 1, -1
                     for i in range(len(valid_folders)):
                         for j in range(i + 1, len(valid_folders)):
-                            if sim_matrix[i][j] > max_sim:
-                                max_sim = sim_matrix[i][j]
-                                best_i, best_j = i, j
-                                
+                            if sim_mat[i][j] > max_sim:
+                                max_sim = sim_mat[i][j]; best_i = i; best_j = j
+    
                     if max_sim > -1:
-                        folder_a, folder_b = valid_folders[best_i], valid_folders[best_j]
-                        parent = folder_a if len(os.listdir(folder_a)) >= len(os.listdir(folder_b)) else folder_b
-                        child = folder_b if parent == folder_a else folder_a
+                        fa, fb = valid_folders[best_i], valid_folders[best_j]
+                        parent = fa if len(os.listdir(fa)) >= len(os.listdir(fb)) else fb
+                        child  = fb if parent == fa else fa
                         try:
-                            target_path = os.path.join(parent, os.path.basename(child))
-                            if os.path.exists(target_path): target_path += "_merged"
-                            shutil.move(child, target_path); move_history.append((target_path, child))
-                            results_message += f"📁 Force Merged Folders: [{os.path.basename(child)}] ➡️ [{os.path.basename(parent)}]\n   • Best Available Match Score: {max_sim:.1%}\n"
-                        except Exception as e: print(f"Merge error: {e}")
-                    
-                    progress.close()
-                    self.handle_satisfaction_check(results_message, "", move_history, current_view_path)
-                    return
-
+                            target = os.path.join(parent, os.path.basename(child))
+                            if os.path.exists(target):
+                                target += "_merged"
+                            shutil.move(child, target)
+                            move_history.append((target, child))
+                            results_message += (
+                                f"📁 Merged [{os.path.basename(child)}] → "
+                                f"[{os.path.basename(parent)}]  "
+                                f"({max_sim:.1%} similarity)\n"
+                            )
+                        except Exception as e:
+                            print(f"Merge error: {e}")
+    
+                progress.close()
+                self.handle_satisfaction_check(
+                    results_message, "", move_history, current_view_path)
+                return
+    
+            # ── BRANCH B: folders + files → supervised text sort + CNN media ─────
             if folders_selected and files_selected:
-                training_texts, training_labels = [], []
-                folder_paths_map = {} 
-                
-                for folder in folders_selected:
-                    folder_name = os.path.basename(folder)
-                    folder_paths_map[folder_name] = folder 
-
-                    synthetic_data = (folder_name + " ") * 50
-                    for _ in range(5):
-                        training_texts.append(synthetic_data)
-                        training_labels.append(folder_name)
-
-                    for root, dirs, files in os.walk(folder):
-                        for file in files:
-                            text = read_ultimate_precision_content(os.path.join(root, file))
-                            if text.strip(): training_texts.append(text); training_labels.append(folder_name) 
-
-                unsorted_texts, valid_unsorted_files = [], []
-                for f in files_selected:
-                    text = read_ultimate_precision_content(f)
-                    if text.strip(): unsorted_texts.append(text); valid_unsorted_files.append(f)
-
-                if valid_unsorted_files:
-                    progress = QProgressDialog("Analyzing Destinations...", "Cancel", 0, len(valid_unsorted_files), self)
-                    progress.setMinimumDuration(0); progress.setWindowModality(Qt.WindowModality.WindowModal)
-
-                    unique_labels = list(set(training_labels))
-                    if len(unique_labels) < 2:
-                        target_folder_name = unique_labels[0]
-                        dest_folder_path = folder_paths_map[target_folder_name]
-                        for i, file_path in enumerate(valid_unsorted_files):
-                            if progress.wasCanceled(): break
-                            file_name = os.path.basename(file_path); dest_file_path = os.path.join(dest_folder_path, file_name)
-                            base, ext_name = os.path.splitext(file_name)
-                            counter = 1
-                            while os.path.exists(dest_file_path):
-                                dest_file_path = os.path.join(dest_folder_path, f"{base}_copy{counter}{ext_name}"); counter += 1
-                            
-                            shutil.move(file_path, dest_file_path); move_history.append((dest_file_path, file_path))
-                            results_message += f"✓ Sorted '{file_name}' ➡️ [{target_folder_name}] (Single Target Direct Move)\n"
+    
+                # B-1: Images + Videos → CNN
+                if image_files or video_files:
+                    results_message, cnn_m = self._classify_and_move_images(
+                        image_files, video_files,
+                        dest_base=current_view_path,
+                        move_history=move_history,
+                    )
+                    metrics_message += cnn_m
+    
+                # B-2: Text files → TF-IDF + RF + SVM (your original logic)
+                if text_files:
+                    training_texts, training_labels = [], []
+                    folder_paths_map = {}
+    
+                    for folder in folders_selected:
+                        folder_name = os.path.basename(folder)
+                        folder_paths_map[folder_name] = folder
+                        synthetic = (folder_name + " ") * 50
+                        for _ in range(5):
+                            training_texts.append(synthetic)
+                            training_labels.append(folder_name)
+                        for root, dirs, files in os.walk(folder):
+                            for file in files:
+                                text = read_ultimate_precision_content(
+                                    os.path.join(root, file))
+                                if text.strip():
+                                    training_texts.append(text)
+                                    training_labels.append(folder_name)
+    
+                    unsorted_texts, valid_unsorted = [], []
+                    for f in text_files:
+                        text = read_ultimate_precision_content(f)
+                        if text.strip():
+                            unsorted_texts.append(text)
+                            valid_unsorted.append(f)
+    
+                    if valid_unsorted:
+                        progress = QProgressDialog(
+                            "Analysing text destinations…", "Cancel",
+                            0, len(valid_unsorted), self)
+                        progress.setMinimumDuration(0)
+                        progress.setWindowModality(Qt.WindowModality.WindowModal)
+    
+                        unique_labels = list(set(training_labels))
+                        if len(unique_labels) < 2:
+                            # Single-destination direct move
+                            tgt_name = unique_labels[0]
+                            tgt_path = folder_paths_map[tgt_name]
+                            for i, fp in enumerate(valid_unsorted):
+                                if progress.wasCanceled():
+                                    break
+                                fn  = os.path.basename(fp)
+                                dst = os.path.join(tgt_path, fn)
+                                b, e = os.path.splitext(fn); c = 1
+                                while os.path.exists(dst):
+                                    dst = os.path.join(tgt_path, f"{b}_copy{c}{e}"); c += 1
+                                shutil.move(fp, dst)
+                                move_history.append((dst, fp))
+                                results_message += (
+                                    f"✓ Sorted '{fn}' → [{tgt_name}] "
+                                    f"(Single Target)\n")
+                                progress.setValue(i + 1); QApplication.processEvents()
+                            progress.close()
+                            self.handle_satisfaction_check(
+                                results_message,
+                                metrics_message + "📊 DIRECT SORT: Single destination.\n\n",
+                                move_history, current_view_path)
+                            return
+    
+                        vectorizer = TfidfVectorizer(
+                            stop_words='english', max_features=5000,
+                            ngram_range=(1, 3), min_df=1, max_df=0.80,
+                            sublinear_tf=True)
+                        X_all  = vectorizer.fit_transform(training_texts)
+                        rf     = RandomForestClassifier(n_estimators=300,
+                            criterion='entropy', class_weight='balanced',
+                            random_state=42)
+                        svm    = SVC(kernel='linear', C=3.0,
+                            class_weight='balanced', probability=True,
+                            random_state=42)
+                        rf.fit(X_all, training_labels)
+                        svm.fit(X_all, training_labels)
+    
+                        rf_p  = rf.predict(X_all)
+                        svm_p = svm.predict(X_all)
+                        metrics_message += (
+                            f"📊 ENSEMBLE (TEXT):\n"
+                            f"   • RF  precision: "
+                            f"{precision_score(training_labels, rf_p, average='weighted', zero_division=0):.2%}\n"
+                            f"   • SVM precision: "
+                            f"{precision_score(training_labels, svm_p, average='weighted', zero_division=0):.2%}\n\n"
+                        )
+    
+                        X_u     = vectorizer.transform(unsorted_texts)
+                        rf_pr   = rf.predict_proba(X_u)
+                        svm_pr  = svm.predict_proba(X_u)
+                        rf_cls  = rf.classes_
+                        svm_cls = svm.classes_
+    
+                        for i, fp in enumerate(valid_unsorted):
+                            if progress.wasCanceled():
+                                break
+                            rf_pred  = rf_cls[np.argmax(rf_pr[i])]
+                            svm_pred = svm_cls[np.argmax(svm_pr[i])]
+                            rf_conf  = np.max(rf_pr[i])
+                            svm_conf = np.max(svm_pr[i])
+    
+                            if rf_pred == svm_pred:
+                                tgt = rf_pred; icon = "✓"
+                            else:
+                                tgt  = rf_pred if rf_conf >= svm_conf else svm_pred
+                                icon = "⚡ (Tie-Breaker)"
+    
+                            tgt_path = folder_paths_map.get(tgt)
+                            if not tgt_path or not os.path.exists(tgt_path):
+                                if rf_pred == svm_pred:
+                                    tgt_path = os.path.join(current_view_path, tgt)
+                                else:
+                                    results_message += (
+                                        f"⚠️ Skipped '{os.path.basename(fp)}' "
+                                        f"→ [{tgt}] (Hallucinated target)\n")
+                                    continue
+    
+                            fn  = os.path.basename(fp)
+                            dst = os.path.join(tgt_path, fn)
+                            b, e = os.path.splitext(fn); c = 1
+                            while os.path.exists(dst):
+                                dst = os.path.join(tgt_path, f"{b}_copy{c}{e}"); c += 1
+                            shutil.move(fp, dst)
+                            move_history.append((dst, fp))
+                            results_message += f"{icon} Sorted '{fn}' → [{tgt}]\n"
                             progress.setValue(i + 1); QApplication.processEvents()
                         progress.close()
-                        self.handle_satisfaction_check(results_message, "📊 DIRECT SORTING:\n   • Logic: Single Destination Selected\n   • Coverage: 100% Automated Distribution\n\n", move_history, current_view_path)
-                        return
-
-                    vectorizer = TfidfVectorizer(stop_words='english', max_features=5000, ngram_range=(1, 3), min_df=1, max_df=0.80, sublinear_tf=True)
-                    X_all = vectorizer.fit_transform(training_texts)
-                    
-                    rf_model = RandomForestClassifier(n_estimators=300, criterion='entropy', class_weight='balanced', random_state=42)
-                    svm_model_sup = SVC(kernel='linear', C=3.0, class_weight='balanced', probability=True, random_state=42)
-                    
-                    rf_model.fit(X_all, training_labels)
-                    svm_model_sup.fit(X_all, training_labels)
-                    
-                    rf_preds = rf_model.predict(X_all)
-                    svm_preds = svm_model_sup.predict(X_all)
-                    
-                    metrics_message = f"📊 ENSEMBLE CONSENSUS REPORT:\n   • RF Precision: {precision_score(training_labels, rf_preds, average='weighted', zero_division=0):.2%}\n   • SVM Precision: {precision_score(training_labels, svm_preds, average='weighted', zero_division=0):.2%}\n   • Logic: Soft Voting Probability Averaging\n\n"
-
-                    X_unsorted = vectorizer.transform(unsorted_texts)
-                    rf_probs = rf_model.predict_proba(X_unsorted)
-                    svm_probs = svm_model_sup.predict_proba(X_unsorted)
-                    
-                    rf_classes = rf_model.classes_
-                    svm_classes = svm_model_sup.classes_
-
-                    for i, file_path in enumerate(valid_unsorted_files):
-                        if progress.wasCanceled(): break
-                        
-                        rf_pred = rf_classes[np.argmax(rf_probs[i])]
-                        svm_pred = svm_classes[np.argmax(svm_probs[i])]
-                        rf_conf = np.max(rf_probs[i])
-                        svm_conf = np.max(svm_probs[i])
-                        
-                        if rf_pred == svm_pred:
-                            target_folder_name = rf_pred
-                            status_icon = "✓"
-                        else:
-                            target_folder_name = rf_pred if rf_conf >= svm_conf else svm_pred
-                            status_icon = "⚡ (Tie-Breaker)"
-
-                        dest_folder_path = folder_paths_map.get(target_folder_name, None)
-                        
-                        if not dest_folder_path or not os.path.exists(dest_folder_path):
-                             if rf_pred == svm_pred:
-                                 dest_folder_path = os.path.join(current_view_path, rf_pred)
-                             else:
-                                 results_message += f"⚠️ Skipped '{os.path.basename(file_path)}' ➡️ [{target_folder_name}] (Hallucinated Folder Target)\n"
-                                 continue
-
-                        file_name = os.path.basename(file_path); dest_file_path = os.path.join(dest_folder_path, file_name)
-                        base, ext_name = os.path.splitext(file_name)
-                        counter = 1
-                        while os.path.exists(dest_file_path):
-                            dest_file_path = os.path.join(dest_folder_path, f"{base}_copy{counter}{ext_name}"); counter += 1
-                        
-                        shutil.move(file_path, dest_file_path); move_history.append((dest_file_path, file_path))
-                        results_message += f"{status_icon} Sorted '{file_name}' ➡️ [{target_folder_name}]\n"
-                        progress.setValue(i + 1); QApplication.processEvents()
-                    progress.close()
-                    self.handle_satisfaction_check(results_message, metrics_message, move_history, current_view_path)
-                    return
-
-            elif files_selected or (folders_selected and not files_selected):
-                file_contents, valid_files = [], []
-                pool_of_files = files_selected.copy()
-                for folder in folders_selected:
-                    for root, dirs, files in os.walk(folder):
-                        for file in files: pool_of_files.append(os.path.join(root, file))
-
-                for f in pool_of_files:
+    
+                self.handle_satisfaction_check(
+                    results_message, metrics_message, move_history, current_view_path)
+                return
+    
+            # ── BRANCH C: files only (or folders only) → unsupervised ────────────
+            pool = list(files_selected)
+            for folder in folders_selected:
+                for root, dirs, files in os.walk(folder):
+                    for file in files:
+                        pool.append(os.path.join(root, file))
+    
+            pool_images = [f for f in pool if Path(f).suffix.lower() in IMAGE_EXTENSIONS]
+            pool_videos = [f for f in pool if Path(f).suffix.lower() in VIDEO_EXTENSIONS]
+            pool_text   = [f for f in pool
+                        if f not in pool_images and f not in pool_videos]
+    
+            # C-1: Images / Videos → CNN
+            if pool_images or pool_videos:
+                results_message, cnn_m = self._classify_and_move_images(
+                    pool_images, pool_videos,
+                    dest_base=current_view_path,
+                    move_history=move_history,
+                    prefix_msg=results_message,
+                )
+                metrics_message += cnn_m
+    
+            # C-2: Text files → KMeans + RF + SVM (your original unsupervised logic)
+            if pool_text:
+                file_contents, valid_text = [], []
+                for f in pool_text:
                     text = read_ultimate_precision_content(f)
-                    if text.strip(): file_contents.append(text); valid_files.append(f)
-
-                if len(valid_files) >= 2:
-                    progress = QProgressDialog("Extracting boundaries via Soft Voting...", "Cancel", 0, len(valid_files), self)
-                    progress.setMinimumDuration(0); progress.setWindowModality(Qt.WindowModality.WindowModal)
-
-                    vectorizer = TfidfVectorizer(stop_words='english', max_features=3000, ngram_range=(1, 2), min_df=1, max_df=0.90, sublinear_tf=True)
-                    X = vectorizer.fit_transform(file_contents)
-                    feature_names = vectorizer.get_feature_names_out()
-                    
-                    n_clusters = max(1, len(valid_files) // 3)
-                    if n_clusters >= len(valid_files): n_clusters = len(valid_files) - 1
-                    
-                    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=30, max_iter=1000)
+                    if text.strip():
+                        file_contents.append(text); valid_text.append(f)
+    
+                if len(valid_text) >= 2:
+                    progress = QProgressDialog(
+                        "Extracting text clusters…", "Cancel",
+                        0, len(valid_text), self)
+                    progress.setMinimumDuration(0)
+                    progress.setWindowModality(Qt.WindowModality.WindowModal)
+    
+                    vec_u = TfidfVectorizer(stop_words='english', max_features=3000,
+                        ngram_range=(1, 2), min_df=1, max_df=0.90, sublinear_tf=True)
+                    X         = vec_u.fit_transform(file_contents)
+                    feat_names = vec_u.get_feature_names_out()
+    
+                    n_clust   = max(1, len(valid_text) // 3)
+                    if n_clust >= len(valid_text):
+                        n_clust = len(valid_text) - 1
+                    kmeans    = KMeans(n_clusters=n_clust, random_state=42,
+                                    n_init=30, max_iter=1000)
                     kmeans.fit(X)
-                    
-                    cluster_labels = kmeans.labels_
-                    
-                    rf_model_unsup = RandomForestClassifier(n_estimators=300, criterion='entropy', class_weight='balanced', random_state=42)
-                    svm_model_unsup = SVC(kernel='linear', C=2.0, class_weight='balanced', probability=True, random_state=42)
-                    
-                    rf_model_unsup.fit(X, cluster_labels)
-                    svm_model_unsup.fit(X, cluster_labels)
-                    
-                    metrics_message = f"📊 ENTERPRISE CLUSTER REPORT:\n   • Logic: Dual-Model Probability Averaging\n   • Status: 100% Boundary Assignment\n\n"
-
-                    rf_probs = rf_model_unsup.predict_proba(X)
-                    svm_probs = svm_model_unsup.predict_proba(X)
-                    classes = svm_model_unsup.classes_
-                    
-                    for i, file_path in enumerate(valid_files):
-                        if progress.wasCanceled(): break
-                        
-                        avg_probs = (rf_probs[i] + svm_probs[i]) / 2.0
-                        assigned_label = classes[np.argmax(avg_probs)]
-                        
-                        top_word_idx = kmeans.cluster_centers_[assigned_label].argsort()[-1]
-                        target_folder = feature_names[top_word_idx].title()
-                        if len(target_folder) < 3: target_folder = f"Subject_Area_{assigned_label+1}"
-                        status_icon = "✓"
-                        
-                        dest_folder_path = os.path.join(current_view_path, target_folder)
-                        if not os.path.exists(dest_folder_path): os.mkdir(dest_folder_path)
-                        file_name = os.path.basename(file_path); dest_file_path = os.path.join(dest_folder_path, file_name)
-                        base, ext_name = os.path.splitext(file_name)
-                        counter = 1
-                        while os.path.exists(dest_file_path):
-                            dest_file_path = os.path.join(dest_folder_path, f"{base}_copy{counter}{ext_name}"); counter += 1
-                        
-                        shutil.move(file_path, dest_file_path); move_history.append((dest_file_path, file_path))
-                        results_message += f"{status_icon} Smart Grouped '{file_name}' ➡️ [{target_folder}]\n"
+                    clabels   = kmeans.labels_
+    
+                    rf_u  = RandomForestClassifier(n_estimators=300,
+                        criterion='entropy', class_weight='balanced', random_state=42)
+                    svm_u = SVC(kernel='linear', C=2.0, class_weight='balanced',
+                        probability=True, random_state=42)
+                    rf_u.fit(X, clabels); svm_u.fit(X, clabels)
+                    metrics_message += (
+                        "📊 CLUSTER REPORT (TEXT):\n"
+                        "   • Logic: KMeans + RF/SVM soft-vote\n\n")
+    
+                    rf_pr  = rf_u.predict_proba(X)
+                    svm_pr = svm_u.predict_proba(X)
+                    cls_u  = svm_u.classes_
+    
+                    for i, fp in enumerate(valid_text):
+                        if progress.wasCanceled():
+                            break
+                        avg       = (rf_pr[i] + svm_pr[i]) / 2.0
+                        lbl       = cls_u[np.argmax(avg)]
+                        word_idx  = kmeans.cluster_centers_[lbl].argsort()[-1]
+                        tgt_name  = feat_names[word_idx].title()
+                        if len(tgt_name) < 3:
+                            tgt_name = f"Subject_Area_{lbl+1}"
+                        tgt_path  = os.path.join(current_view_path, tgt_name)
+                        if not os.path.exists(tgt_path):
+                            os.mkdir(tgt_path)
+                        fn  = os.path.basename(fp)
+                        dst = os.path.join(tgt_path, fn)
+                        b, e = os.path.splitext(fn); c = 1
+                        while os.path.exists(dst):
+                            dst = os.path.join(tgt_path, f"{b}_copy{c}{e}"); c += 1
+                        shutil.move(fp, dst)
+                        move_history.append((dst, fp))
+                        results_message += f"✓ Grouped '{fn}' → [{tgt_name}]\n"
                         progress.setValue(i + 1); QApplication.processEvents()
                     progress.close()
-                    self.handle_satisfaction_check(results_message, metrics_message, move_history, current_view_path)
-                    return
+    
+            if move_history:
+                self.handle_satisfaction_check(
+                    results_message, metrics_message, move_history, current_view_path)
             else:
-                QMessageBox.warning(self, "Invalid Selection", "Please select files or folders to organize.")
-
+                # Show error details if the CNN reported problems, otherwise generic message
+                error_lines = [
+                    line for line in results_message.splitlines()
+                    if line.strip().startswith(("❌", "⚠️"))
+                ]
+                if error_lines:
+                    detail = "\n".join(error_lines)
+                    QMessageBox.warning(
+                        self, "Smart Organise — Issues Found",
+                        f"The AI ran but could not sort the files.\n\n"
+                        f"Details:\n{detail}\n\n"
+                        f"Check the terminal / console for the full traceback."
+                    )
+                else:
+                    QMessageBox.warning(
+                        self, "Nothing Organised",
+                        "No recognisable files were found in the selection.\n\n"
+                        "Tip: Select image files (.jpg, .png, .webp) or text files "
+                        "(.pdf, .docx, .txt) to use Smart Organise."
+                    )
+    
         except Exception as e:
-            QMessageBox.critical(self, "Semantic Error", f"Precision pipeline failed: {e}")
+            QMessageBox.critical(self, "Smart Organise Error",
+                                f"Unexpected error:\n\n{e}")
+            print(f"[handle_smart_organise] {e}")
+ 
 
     def handle_satisfaction_check(self, results, metrics, history, current_path):
         if hasattr(self.files_view, 'file_table'): self.files_view.file_table.load_files(current_path)
@@ -612,6 +771,187 @@ class SmartFileManager(QMainWindow):
             if event.button() == Qt.MouseButton.BackButton: self.files_view.go_back(); event.accept(); return
             elif event.button() == Qt.MouseButton.ForwardButton: self.files_view.go_forward(); event.accept(); return
         super().mousePressEvent(event)
+    
+    #CNN logic is here
+    def _get_classifier(self):
+        """
+        Lazy-loads ImageClassifier on first call.  Subsequent calls reuse
+        the already-loaded model so the 2-3 second load only happens once.
+    
+        Raises FileNotFoundError if best_model.pth is missing.
+        """
+        if self._image_classifier is None:
+            if not os.path.exists(CNN_MODEL_PATH):
+                raise FileNotFoundError(
+                    f"CNN model checkpoint not found:\n{CNN_MODEL_PATH}\n\n"
+                    "Make sure best_model.pth is in the models/trained/ folder."
+                )
+            from src.inference.classifier import ImageClassifier
+            print(f"[KemasLah] Loading CNN from {CNN_MODEL_PATH} …")
+            self._image_classifier = ImageClassifier(CNN_MODEL_PATH)
+            print("[KemasLah] CNN loaded.")
+        return self._image_classifier
+ 
+    def _classify_and_move_images(
+        self,
+        image_paths: list,
+        video_paths: list,
+        dest_base: str,
+        move_history: list,
+        prefix_msg: str = "",
+    ) -> tuple:
+        """
+        CNN branch of Smart Organise.
+    
+        Classifies every image and video file (videos via middle-frame
+        extraction) and moves each to:
+            dest_base/<PredictedCategory>/filename
+    
+        Parameters
+        ----------
+        image_paths  : list of absolute paths to image files
+        video_paths  : list of absolute paths to video files
+        dest_base    : root folder where category sub-folders are created
+        move_history : list — (dest, src) tuples appended for undo support
+        prefix_msg   : text already built before calling this (prepended)
+    
+        Returns
+        -------
+        (results_msg: str, metrics_msg: str)
+        """
+        from src.inference.classifier import extract_keyframe
+    
+        results_msg = prefix_msg
+        temp_kfs    = []
+    
+        # Build the list that goes to the CNN
+        classify_paths = list(image_paths)
+        kf_to_video: dict[str, str] = {}
+    
+        for vp in video_paths:
+            kf = extract_keyframe(vp, output_dir="outputs/keyframes")
+            if kf:
+                classify_paths.append(kf)
+                kf_to_video[kf] = vp
+                temp_kfs.append(kf)
+            else:
+                results_msg += (
+                    f"⚠️ Could not read keyframe from "
+                    f"'{os.path.basename(vp)}' — skipped.\n"
+                )
+    
+        if not classify_paths:
+            return results_msg, ""
+    
+        # Load the model
+        try:
+            classifier = self._get_classifier()
+        except FileNotFoundError as e:
+            results_msg += f"❌ CNN unavailable: {e}\n"
+            return results_msg, "❌ CNN model missing — images not sorted.\n\n"
+    
+        # Progress dialog
+        total    = len(classify_paths)
+        progress = QProgressDialog(
+            f"🖼️  CNN classifying {total} image/video file(s)…",
+            "Cancel", 0, total, self,
+        )
+        progress.setMinimumDuration(0)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+    
+        try:
+            cnn_results = classifier.classify_batch(classify_paths, batch_size=16)
+        except Exception as e:
+            progress.close()
+            results_msg += f"❌ CNN batch error: {e}\n"
+            return results_msg, "❌ CNN batch inference failed.\n\n"
+    
+        confident = fallback = 0
+    
+        for idx, result in enumerate(cnn_results):
+            if progress.wasCanceled():
+                break
+    
+            clf_path   = result["file_path"]
+            category   = result["category"]   # one of the 10 KemasLah categories
+            confidence = result["confidence"]
+            accepted   = result["accepted"]
+    
+            # Map keyframe back to the original video path if needed
+            real_path = kf_to_video.get(clf_path, clf_path)
+            file_name = os.path.basename(real_path)
+    
+            # Create category folder (e.g.  …/Vacation_Travel/)
+            dest_folder = os.path.join(dest_base, category)
+            os.makedirs(dest_folder, exist_ok=True)
+    
+            # Avoid overwriting an existing file of the same name
+            dest_file   = os.path.join(dest_folder, file_name)
+            base, ext   = os.path.splitext(file_name)
+            counter     = 1
+            while os.path.exists(dest_file):
+                dest_file = os.path.join(dest_folder, f"{base}_copy{counter}{ext}")
+                counter  += 1
+    
+            try:
+                shutil.move(real_path, dest_file)
+                move_history.append((dest_file, real_path))
+                status = "✓" if accepted else "⚡"
+                results_msg += (
+                    f"{status} CNN: '{file_name}' → [{category}] "
+                    f"({confidence:.0%})\n"
+                )
+                if accepted:
+                    confident += 1
+                else:
+                    fallback  += 1
+            except Exception as e:
+                results_msg += f"⚠️ Could not move '{file_name}': {e}\n"
+    
+            progress.setValue(idx + 1)
+            QApplication.processEvents()
+    
+        progress.close()
+    
+        # Clean up temporary keyframe JPEGs
+        for kf in temp_kfs:
+            try:
+                os.remove(kf)
+            except Exception:
+                pass
+    
+        metrics_msg = (
+            f"📊 CNN IMAGE CLASSIFICATION REPORT:\n"
+            f"   • Backbone          : ResNet50 (Places365 + MS COCO)\n"
+            f"   • Output categories : 10 KemasLah categories\n"
+            f"   • Files processed   : {total}\n"
+            f"   • High confidence   : {confident}  "
+            f"({confident/total:.0%} of media)\n"
+            f"   • Fallback category : {fallback}\n\n"
+        )
+        return results_msg, metrics_msg
+    
+    
+    def _on_cnn_image_match(self, name: str, full_path: str,
+                            category: str, confidence: float):
+        """
+        Slot for CNNSearchWorker.match_found.
+        Adds the matched image into the file table alongside text results.
+        """
+        # _add_search_row is the same helper used by the text SearchWorker
+        self.files_view.file_table._add_search_row(name, full_path, is_dir=False)
+    
+    
+    def _on_cnn_search_done(self, scanned: int, matched: int):
+        """Slot for CNNSearchWorker.search_finished."""
+        print(f"[CNN Search] Done — scanned {scanned} media files, "
+            f"matched {matched}.")
+    
+    
+    def _on_cnn_search_error(self, message: str):
+        """Slot for CNNSearchWorker.error_occurred."""
+        # Silent — text search still works even if CNN is unavailable.
+        print(f"[CNN Search] Error (non-fatal): {message}")  
 
 class KemaslahApp(QMainWindow):
     def __init__(self):
