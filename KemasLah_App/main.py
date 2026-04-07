@@ -307,6 +307,13 @@ class SmartFileManager(QMainWindow):
     # -------------------------------------------------------------------------
     def handle_smart_organise(self):
         current_widget = self.stack.currentWidget()
+        
+        # --- NEW: Route to Archive Logic ---
+        if current_widget == self.archive_view:
+            self.archive_view.open_date_dialog()
+            return
+            
+        # --- EXISTING: Route to Organise Logic ---
         if current_widget != self.files_view:
             return
     
@@ -314,7 +321,7 @@ class SmartFileManager(QMainWindow):
         if not selected_paths:
             QMessageBox.warning(self, "No Selection",
                                 "Please select folders or files to organize.")
-            return
+            return  
     
         # ── Split selection by type ───────────────────────────────────────────────
         folders_selected = [p for p in selected_paths if os.path.isdir(p)]
@@ -732,16 +739,28 @@ class SmartFileManager(QMainWindow):
                 if hasattr(self.files_view, 'file_table'): self.files_view.file_table.load_files(current_path)
 
     def switch_view(self, identifier):
+        # NEW: Get current language so the button translates instantly when swapped
+        lang_code = self.user_data.get('language_code', 'en')
+        
         if identifier == "settings": self.show_settings_overlay()
         elif identifier in ["sharing", "file_sharing"]:
             self.sharing_view.load_shared_files(); self.stack.setCurrentWidget(self.sharing_view)
             self.top_bar.update_breadcrumbs("File Sharing"); self.sidebar.set_active(identifier) 
         else:
             self.sidebar.set_active(identifier)
-            if identifier == "home": self.stack.setCurrentWidget(self.home_view); self.top_bar.update_breadcrumbs("Home")
-            elif identifier == "files": self.stack.setCurrentWidget(self.files_view); self.top_bar.update_breadcrumbs(self.files_view.current_path)
-            elif identifier == "archive": self.stack.setCurrentWidget(self.archive_view); self.top_bar.update_breadcrumbs("Smart Archive")
-            elif identifier == "statistics": self.stack.setCurrentWidget(self.statistics_view); self.top_bar.update_breadcrumbs("Statistics")
+            if identifier == "home": 
+                self.stack.setCurrentWidget(self.home_view); self.top_bar.update_breadcrumbs("Home")
+            
+            elif identifier == "files": 
+                self.stack.setCurrentWidget(self.files_view); self.top_bar.update_breadcrumbs(self.files_view.current_path)
+                self.action_bar.set_smart_mode("organise", lang_code) # Swaps to Organise
+            
+            elif identifier == "archive": 
+                self.stack.setCurrentWidget(self.archive_view); self.top_bar.update_breadcrumbs("Smart Archive")
+                self.action_bar.set_smart_mode("archive", lang_code) # Swaps to Archive
+            
+            elif identifier == "statistics": 
+                self.stack.setCurrentWidget(self.statistics_view); self.top_bar.update_breadcrumbs("Statistics")
 
     def on_topbar_nav(self, path):
         if self.stack.currentWidget() == self.files_view: self.files_view.on_breadcrumb_clicked(path)

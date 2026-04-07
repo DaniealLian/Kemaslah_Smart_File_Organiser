@@ -118,3 +118,17 @@ class ActionBar(QWidget):
         if hasattr(self, 'smart_btn'):
             translated_smart = translate_text(self.smart_base_text, lang_code)
             self.smart_btn.setText(f"✏ {translated_smart}")
+
+    def set_smart_mode(self, mode, lang_code="en"):
+        """Swaps the button's text, icon, and translation base dynamically"""
+        if not hasattr(self, 'smart_btn'): return
+        
+        if mode == "organise":
+            self.smart_base_text = "Smart Organise"
+            icon = "✏"
+        elif mode == "archive":
+            self.smart_base_text = "Smart Archive"
+            icon = "⚙"
+            
+        translated_text = translate_text(self.smart_base_text, lang_code)
+        self.smart_btn.setText(f"{icon} {translated_text}")
