@@ -15,7 +15,6 @@ from pymongo import MongoClient
 import gridfs
 # ----------------------------
 
-from auth.config import DB_PATH
 from auth.database import revoke_file_share, update_file_share, request_extension, resolve_extension
 
 # =====================================================================

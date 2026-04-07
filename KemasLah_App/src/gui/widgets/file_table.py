@@ -55,13 +55,27 @@ class SearchWorker(QThread):
                     if self.query in f.lower():
                         match = True
 
-                    # ✅ B. Search file content (NEW)
+                    # ✅ B. Search file content (UPDATED: more file types supported)
                     else:
                         try:
                             ext = f.split('.')[-1].lower()
 
-                            # --- TEXT FILES ---
-                            if ext in ['txt', 'csv', 'json']:
+                            UNSUPPORTED = {
+                                'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'tiff', 'svg', 'ico',
+                                'mp4', 'avi', 'mov', 'mkv', 'wmv', 'flv', 'webm',
+                                'mp3', 'wav', 'flac', 'aac', 'ogg', 'wma',
+                                'zip', 'rar', '7z', 'tar', 'gz',
+                                'exe', 'dll', 'bin', 'iso', 'dmg',
+                                'db', 'sqlite', 'pkl', 'pyc'
+                            }
+
+                            if ext in UNSUPPORTED:
+                                pass  # Skip silently — no text content possible
+
+                            # --- TEXT-BASED FILES ---
+                            elif ext in ['txt', 'csv', 'json', 'md', 'py', 'rtf',
+                                         'xml', 'html', 'htm', 'yaml', 'yml',
+                                         'toml', 'ini', 'log']:
                                 with open(full_path, 'r', errors='ignore') as file:
                                     content = file.read().lower()
                                     if self.query in content:
@@ -87,7 +101,39 @@ class SearchWorker(QThread):
                                         match = True
                                         break
 
-                            # ❌ Ignore other file types (images/videos automatically skipped)
+                            # --- XLSX / XLS FILE ---
+                            elif ext in ['xlsx', 'xls']:
+                                import openpyxl
+                                wb = openpyxl.load_workbook(full_path, read_only=True, data_only=True)
+                                for sheet in wb.worksheets:
+                                    for row in sheet.iter_rows(max_row=200, values_only=True):
+                                        row_text = " ".join(str(c) for c in row if c is not None).lower()
+                                        if self.query in row_text:
+                                            match = True
+                                            break
+                                    if match: break
+                                wb.close()
+
+                            # --- PPTX FILE ---
+                            elif ext == 'pptx':
+                                from pptx import Presentation as PptxPresentation
+                                prs = PptxPresentation(full_path)
+                                for slide in prs.slides:
+                                    for shape in slide.shapes:
+                                        if hasattr(shape, "text") and self.query in shape.text.lower():
+                                            match = True
+                                            break
+                                    if match: break
+
+                            else:
+                                # Unknown extension — try reading as plain text, ignore errors
+                                try:
+                                    with open(full_path, 'r', errors='ignore') as file:
+                                        content = file.read(5000).lower()
+                                        if self.query in content:
+                                            match = True
+                                except Exception:
+                                    pass
 
                         except Exception:
                             pass  # Ignore unreadable files safely

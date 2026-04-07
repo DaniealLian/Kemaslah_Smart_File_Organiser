@@ -1,15 +1,28 @@
+import psycopg2
 from flask import Flask, request, url_for, session, redirect
-import sqlite3
 import os
 from datetime import datetime
 # Import Authlib for Google Login
 from authlib.integrations.flask_client import OAuth
-# Import database functions to save the user
-from .database import register_user, complete_login_request, DB_NAME
 from .config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, FLASK_SECRET_KEY
 
-# FIXED: Create Flask app FIRST, then configure it
+# Create Flask app FIRST, then configure it
 app = Flask(__name__)
+
+def get_db_connection():
+    try:
+        return psycopg2.connect(
+            host="db.urzssrfwuyhkebkwcbdx.supabase.co",
+            database="postgres",
+            user="postgres",
+            password="nc9@nftkbZ8g-#F",
+            sslmode="require"
+        )
+    except psycopg2.OperationalError as e:
+        print(f"Database connection failed: {e}")
+        return None
+
+# Notice: The global conn = psycopg2.connect(...) has been completely REMOVED from here!
 
 # Now configure the app (AFTER it's created)
 app.secret_key = FLASK_SECRET_KEY
@@ -19,7 +32,7 @@ app.config['GOOGLE_CLIENT_SECRET'] = GOOGLE_CLIENT_SECRET
 # --- GOOGLE OAUTH CONFIGURATION ---
 oauth = OAuth(app)
 
-# FIXED: Configuration using server metadata
+# Configuration using server metadata
 google = oauth.register(
     name='google',
     client_id=app.config['GOOGLE_CLIENT_ID'],
@@ -28,24 +41,27 @@ google = oauth.register(
     client_kwargs={'scope': 'openid email profile'},
 )
 
-def get_db_connection():
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
-    return conn
-
 # --- EXISTING: EMAIL VERIFICATION ROUTE ---
 @app.route('/verify')
 def verify():
+    # Safely get connection
+    conn = get_db_connection()
+    if not conn:
+        return "<h1>Database is currently offline</h1>", 500
+    
     email = request.args.get('token')
     if not email: return "<h1>Invalid Request</h1>", 400
 
-    conn = get_db_connection(); cursor = conn.cursor()
+    cur = conn.cursor()
+
     try:
-        cursor.execute("""
-            INSERT INTO VerifiedEmails (email, is_verified, verified_at) 
-            VALUES (?, 1, ?)
-            ON CONFLICT(email) DO UPDATE SET is_verified=1, verified_at=?
-        """, (email, datetime.now(), datetime.now()))
+        cur.execute("""
+            INSERT INTO verified_emails (email, is_verified, verified_at)
+            VALUES (%s, TRUE, NOW())
+            ON CONFLICT (email)
+            DO UPDATE SET is_verified = TRUE, verified_at = NOW()
+        """, (email,))
+        
         conn.commit()
         success = True
     except Exception as e:
@@ -88,7 +104,7 @@ def login_google():
     # Send user to Google's login page
     redirect_uri = url_for('google_auth', _external=True)
     
-    # FIXED: Added prompt='select_account' to force Google to show the account chooser
+    # Added prompt='select_account' to force Google to show the account chooser
     return google.authorize_redirect(redirect_uri, prompt='select_account')
 
 @app.route('/callback/google')
@@ -97,11 +113,16 @@ def google_auth():
     Step 2: User comes back from Google successfully.
     We get their email and update the database so the Desktop App knows they finished.
     """
+    # Safely get connection for this route
+    conn = get_db_connection()
+    if not conn:
+        return "<h1>Login Failed: Database is currently offline</h1>", 500
+
     try:
         # Get user info from Google
         token = google.authorize_access_token()
         
-        # FIXED: Use the FULL URL to prevent "No scheme supplied" error
+        # Use the FULL URL to prevent "No scheme supplied" error
         user_info = google.get('https://openidconnect.googleapis.com/v1/userinfo').json()
         
         email = user_info.get('email')
@@ -111,20 +132,29 @@ def google_auth():
             return "<h1>Login Failed: No email returned from Google.</h1>"
 
         # 1. Register user if they are new
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM User WHERE email = ?", (email,))
-        if not cursor.fetchone():
-            # Auto-register new Google user with a dummy password
-            print(f"Registering new Google user: {email}")
+        cur = conn.cursor()
+
+        cur.execute("SELECT id FROM users WHERE email=%s", (email,))
+        user = cur.fetchone()
+
+        if not user:
             dummy_pass = f"GOOGLE_AUTH_{os.urandom(8).hex()}"
-            register_user(name, email, dummy_pass)
-        conn.close()
+            
+            cur.execute(
+                "INSERT INTO users (username, email, password) VALUES (%s, %s, %s)",
+                (name, email, dummy_pass)
+            )
+            conn.commit()
         
         # 2. Notify the Desktop App (Update LoginState table)
         state_id = session.get('desktop_state_id')
+
         if state_id:
-            complete_login_request(state_id, email)
+            cur.execute(
+                "UPDATE login_requests SET status='completed', email=%s WHERE state_id=%s",
+                (email, state_id)
+            )
+            conn.commit()
             
         # 3. Show Success Page
         return f"""
@@ -140,10 +170,10 @@ def google_auth():
         """
     except Exception as e:
         return f"<h1>Login Failed: {e}</h1>"
+    finally:
+        # ALWAYS close the connection after you are done!
+        if conn:
+            conn.close()
 
 if __name__ == '__main__':
-    # Ensure DB exists before starting
-    if not os.path.exists(DB_NAME):
-        print("Warning: Database file not found. Run authentication_page.py first to create it.")
-        
     app.run(port=5000, debug=True)

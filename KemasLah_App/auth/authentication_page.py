@@ -1,10 +1,7 @@
 import sys
 import os
 import re
-import threading
-import logging
-import random
-import sqlite3
+import requests
 from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
                              QLineEdit, QPushButton, QLabel, QFrame, 
                              QStackedWidget, QMessageBox, QCheckBox, QButtonGroup)
@@ -13,16 +10,6 @@ from PyQt6.QtGui import QFont, QIcon, QDesktopServices # NEW: QDesktopServices
 
 # Use deep_translator for Python 3.13 compatibility
 from deep_translator import GoogleTranslator
-
-# Import database functions and mailer
-# NEW: Added create_login_request and check_login_status to imports
-from .database import (create_db, register_user, validate_login, 
-                      check_email_verified, store_otp, verify_otp, update_password, 
-                      delete_user_account, update_display_name,
-                      get_all_languages, update_user_language, get_language_code,
-                      create_login_request, check_login_status)
-from .mailer import send_verification_email, send_otp_email
-from .server import app as flask_app
 
 # --- Translation Cache ---
 translation_cache = {}
@@ -46,23 +33,6 @@ def translate_text(text, target_lang="en"):
         print(f"Translation error: {e}")
         return text
 
-# --- WORKER THREAD FOR EMAIL ---
-class EmailWorker(QThread):
-    finished = pyqtSignal(bool, str)
-
-    def __init__(self, email, otp):
-        super().__init__()
-        self.email = email
-        self.otp = otp
-
-    def run(self):
-        try:
-            store_otp(self.email, self.otp)
-            send_otp_email(self.email, self.otp)
-            self.finished.emit(True, "OTP sent! Please check your inbox.")
-        except Exception as e:
-            self.finished.emit(False, str(e))
-
 class VerificationWorker(QThread):
     finished = pyqtSignal(bool, str)
 
@@ -72,8 +42,19 @@ class VerificationWorker(QThread):
 
     def run(self):
         try:
-            send_verification_email(self.email, self.email)
-            self.finished.emit(True, f"Verification link sent to {self.email}. Please check your inbox (and spam).")
+            res = requests.post(
+                "http://127.0.0.1:5000/request-email-verification",
+                json={"email": self.email},
+                timeout=5
+            )
+
+            data = res.json()
+
+            if res.status_code == 200:
+                self.finished.emit(True, data.get("message", "Verification email sent"))
+            else:
+                self.finished.emit(False, data.get("message", "Failed to send verification email"))
+
         except Exception as e:
             self.finished.emit(False, str(e))
 
@@ -309,95 +290,109 @@ class LoginPage(QWidget):
     # --- GOOGLE LOGIN LOGIC ---
     
     def handle_google_login(self):
-        """Step 1: Open Browser and start polling DB"""
-        self.current_state_id = create_login_request()
-        
-        # Open the Flask server route
+        try:
+            res = requests.post(
+                "http://127.0.0.1:5000/create-login-request",
+                json={},
+                timeout=5
+            )
+            data = res.json()
+
+            if res.status_code != 200:
+                QMessageBox.critical(self, "Error", data.get("message", "Failed to start Google login"))
+                return
+
+            self.current_state_id = data["state_id"]
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Server error: {e}")
+            return
+
         url = f"http://127.0.0.1:5000/login/google?state_id={self.current_state_id}"
         QDesktopServices.openUrl(QUrl(url))
-        
-        # Reset attempts and update UI Feedback
+
         self.poll_attempts = 0
         self.google_btn.setEnabled(False)
         self.google_btn.setText(f"Waiting for browser... ({self.max_attempts}s)")
-        
-        # Start checking DB every 1 second (1000 milliseconds)
-        self.poll_timer.start(1000) # FIX: Explicitly tell Qt to wait exactly 1000ms before ticking
+        self.poll_timer.start(1000)
 
     def check_google_status(self):
-        """Step 2: Check if browser login finished or timed out"""
-        if not self.current_state_id: return
-        
+        if not self.current_state_id:
+            return
+
         self.poll_attempts += 1
-        
-        # Ask DB: "Did user finish?"
-        user_email = check_login_status(self.current_state_id)
-        
-        if user_email:
-            # SUCCESS!
+
+        try:
+            res = requests.post(
+                "http://127.0.0.1:5000/check-login-status",
+                json={"state_id": self.current_state_id},
+                timeout=5
+            )
+            data = res.json()
+
+            status = data.get("status")
+            user_email = data.get("email")
+
+        except Exception as e:
             self.poll_timer.stop()
             self.google_btn.setEnabled(True)
             self.google_btn.setText(" Continue with Google")
-            
-            user_data = self.fetch_google_user_data(user_email)
-            
-            if user_data:
-                # Convert sqlite3.Row to dict
-                user_dict = dict(user_data) 
-                # EMIT SIGNAL instead of changing stack index here
-                self.login_successful.emit(user_dict) 
-            else:
-                QMessageBox.critical(self, "Error", "Failed to retrieve user data.")
-                
+            QMessageBox.critical(self, "Error", f"Server error: {e}")
+            return
+
+        if status == "completed" and user_email:
+            self.poll_timer.stop()
+            self.google_btn.setEnabled(True)
+            self.google_btn.setText(" Continue with Google")
+
+            user_dict = {
+                "email": user_email,
+                "language_code": "en"
+            }
+            self.login_successful.emit(user_dict)
+
         elif self.poll_attempts >= self.max_attempts:
-            # TIMEOUT! 120 seconds passed
             self.poll_timer.stop()
             self.google_btn.setEnabled(True)
             self.google_btn.setText(" Continue with Google")
             QMessageBox.warning(self, "Login Timeout", "The Google login request timed out because no account was selected.\n\nPlease try again.")
-            
+
         else:
-            # STILL WAITING: Update the countdown text
             seconds_left = self.max_attempts - self.poll_attempts
             self.google_btn.setText(f"Waiting for browser... ({seconds_left}s)")
-
-    def fetch_google_user_data(self, email):
-        """Helper to get user data without password (trusted from Google)"""
-        conn = sqlite3.connect("kemaslah.db")
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT u.*, up.display_name, up.pfp_path, l.language_name, l.language_code
-            FROM User u
-            LEFT JOIN UserProfile up ON u.user_id = up.user_id
-            LEFT JOIN Language l ON u.preferred_language_id = l.language_id
-            WHERE u.email = ?
-        """, (email,))
-        user = cursor.fetchone()
-        conn.close()
-        return user
 
     # -------------------------------
 
     def handle_login(self):
-        e, p = self.email_input.text().strip(), self.pass_input.text()
-        if not e or not p: 
+        e = self.email_input.text().strip()
+        p = self.pass_input.text()
+
+        if not e or not p:
             QMessageBox.warning(self, "Validation Error", "All fields are required.")
             return
-            
-        user_data = validate_login(e, p)
-        if user_data: 
-            # Convert sqlite3.Row to dict
-            user_dict = dict(user_data)
-            
-            # 1. Update translations for the auth pages specifically
-            lang_code = user_dict.get('language_code', 'en')
-            self.window().update_all_pages(lang_code) 
-            
-            # 2. EMIT SIGNAL - Let main.py handle the transition to HomeView
-            self.login_successful.emit(user_dict)
-        else: 
-            QMessageBox.critical(self, "Login Failed", "Invalid Email or Password.")
+
+        try:
+            res = requests.post(
+                "http://127.0.0.1:5000/login",
+                json={
+                    "username": e,
+                    "password": p
+                },
+                timeout=5
+            )
+
+            data = res.json()
+
+            if res.status_code == 200 and data["message"] == "Login success":
+                user_dict = data["user"]
+                lang_code = user_dict.get("language_code", "en")
+                self.window().update_all_pages(lang_code)
+                self.login_successful.emit(user_dict)
+            else:
+                QMessageBox.critical(self, "Login Failed", "Invalid Email or Password.")
+
+        except Exception as ex:
+            QMessageBox.critical(self, "Error", f"Server error: {ex}")
 
 # --- FORGOT PASSWORD PAGE ---
 class ForgotPasswordPage(QWidget):
@@ -450,31 +445,37 @@ class ForgotPasswordPage(QWidget):
 
     def handle_otp_request(self):
         email = self.email_input.text().strip()
-        if not email: QMessageBox.warning(self, "Validation Error", "Email is required."); return
-        if not is_valid_email(email): QMessageBox.warning(self, "Format Error", "Invalid email format."); return
-        
-        conn = sqlite3.connect("kemaslah.db"); cursor = conn.cursor()
-        cursor.execute("SELECT user_id FROM User WHERE email = ?", (email,))
-        if not cursor.fetchone(): 
-            QMessageBox.critical(self, "Error", "This email is not registered.")
-            conn.close(); return
-        conn.close()
+
+        if not email:
+            QMessageBox.warning(self, "Validation Error", "Email is required.")
+            return
+
+        if not is_valid_email(email):
+            QMessageBox.warning(self, "Format Error", "Invalid email format.")
+            return
 
         self.req_btn.setText("Sending...")
         self.req_btn.setEnabled(False)
-        otp = str(random.randint(100000, 999999))
 
-        self.worker = EmailWorker(email, otp)
-        self.worker.finished.connect(self.on_email_sent)
-        self.worker.start()
+        try:
+            res = requests.post(
+                "http://127.0.0.1:5000/request-otp",
+                json={"email": email},
+                timeout=5
+            )
+            data = res.json()
 
-    def on_email_sent(self, success, message):
-        if success:
-            QMessageBox.information(self, "Success", message)
-            self.countdown = 60
-            self.resend_timer.start(1000)
-        else:
-            QMessageBox.critical(self, "Error", f"Failed to send email: {message}")
+            if res.status_code == 200:
+                QMessageBox.information(self, "Success", data.get("message", "OTP sent"))
+                self.countdown = 60
+                self.resend_timer.start(1000)
+            else:
+                QMessageBox.critical(self, "Error", data.get("message", "Failed to send OTP"))
+                self.req_btn.setText("Request OTP")
+                self.req_btn.setEnabled(True)
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Server error: {e}")
             self.req_btn.setText("Request OTP")
             self.req_btn.setEnabled(True)
 
@@ -483,23 +484,41 @@ class ForgotPasswordPage(QWidget):
         else: self.resend_timer.stop(); self.req_btn.setEnabled(True); self.req_btn.setText("Resend OTP")
 
     def handle_otp_submit(self):
-        email, otp = self.email_input.text().strip(), self.otp_input.text().strip()
-        if not email or not otp: QMessageBox.warning(self, "Validation Error", "All fields are required."); return
-        
+        email = self.email_input.text().strip()
+        otp = self.otp_input.text().strip()
+
+        if not email or not otp:
+            QMessageBox.warning(self, "Validation Error", "All fields are required.")
+            return
+
         try:
-            if verify_otp(email, otp): 
-                self.stack.widget(3).set_email(email)  
-                self.stack.setCurrentIndex(3)           
-            else: 
-                QMessageBox.critical(self, "Error", "Invalid or expired OTP code.")
+            res = requests.post(
+                "http://127.0.0.1:5000/verify-otp",
+                json={
+                    "email": email,
+                    "otp": otp
+                },
+                timeout=5
+            )
+            data = res.json()
+
+            if res.status_code == 200:
+                self.stack.widget(3).set_email(email)
+                self.stack.widget(3).set_verified_otp(otp)
+                self.stack.setCurrentIndex(3)
+            else:
+                QMessageBox.critical(self, "Error", data.get("message", "Invalid or expired OTP code."))
+
         except Exception as e:
-            QMessageBox.critical(self, "System Error", f"Database error: {e}")
+            QMessageBox.critical(self, "System Error", f"Server error: {e}")
 
 # --- RESET PASSWORD PAGE ---
 class ResetPasswordPage(QWidget):
     def __init__(self, parent_stack):
         super().__init__()
-        self.stack = parent_stack; self.email = ""
+        self.stack = parent_stack
+        self.email = ""
+        self.verified_otp = ""
         layout = QVBoxLayout(self); layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.basedir = os.path.dirname(__file__)
         self.icon_visible = os.path.join(self.basedir, "assets", "visible.png")
@@ -556,11 +575,44 @@ class ResetPasswordPage(QWidget):
     def set_email(self, email): self.email = email
 
     def handle_final_reset(self):
-        p, rp = self.p_in.text(), self.rp_in.text()
-        if not p or not rp: QMessageBox.warning(self, "Validation Error", "All fields are required."); return
-        if p != rp: QMessageBox.critical(self, "Error", "Passwords do not match!"); return
-        if not is_strong_password(p): QMessageBox.critical(self, "Security Error", "Password must be 10+ chars with Mixed Case and Digit."); return
-        update_password(self.email, p); QMessageBox.information(self, "Success", "Password updated!"); self.stack.setCurrentIndex(0)
+        p = self.p_in.text()
+        rp = self.rp_in.text()
+
+        if not p or not rp:
+            QMessageBox.warning(self, "Validation Error", "All fields are required.")
+            return
+
+        if p != rp:
+            QMessageBox.critical(self, "Error", "Passwords do not match!")
+            return
+
+        if not is_strong_password(p):
+            QMessageBox.critical(self, "Security Error", "Password must be 10+ chars with Mixed Case and Digit.")
+            return
+
+        try:
+            res = requests.post(
+                "http://127.0.0.1:5000/reset-password",
+                json={
+                    "email": self.email,
+                    "otp": self.verified_otp,
+                    "new_password": p
+                },
+                timeout=5
+            )
+            data = res.json()
+
+            if res.status_code == 200:
+                QMessageBox.information(self, "Success", "Password updated!")
+                self.stack.setCurrentIndex(0)
+            else:
+                QMessageBox.critical(self, "Error", data.get("message", "Failed to reset password."))
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Server error: {e}")
+    
+    def set_verified_otp(self, otp):
+        self.verified_otp = otp
 
 # --- REGISTER PAGE ---
 class RegisterPage(QWidget):
@@ -651,26 +703,78 @@ class RegisterPage(QWidget):
 
     def poll_verification(self):
         email = self.e_in.text().strip()
-        if check_email_verified(email): 
-            self.check_timer.stop()
-            self.reg_btn.setEnabled(True)
-            self.v_btn.setText("Verified")
-            QMessageBox.information(self, "Verified", "Email verified successfully! You can now click Register.")
+
+        try:
+            res = requests.post(
+                "http://127.0.0.1:5000/check-email-verified",
+                json={"email": email},
+                timeout=5
+            )
+            data = res.json()
+
+            if data.get("verified") is True:
+                self.check_timer.stop()
+                self.reg_btn.setEnabled(True)
+                self.v_btn.setText("Verified")
+                QMessageBox.information(
+                    self,
+                    "Verified",
+                    "Email verified successfully! You can now click Register."
+                )
+
+        except Exception as e:
+            print(f"Verification polling error: {e}")
 
     def handle_registration(self):
-        u, e, p, rp = self.u_in.text().strip(), self.e_in.text().strip(), self.p_in.text(), self.rp_in.text()
-        
-        if not all([u, e, p, rp]): QMessageBox.critical(self, "Validation Error", "All fields are required."); return
-        if p != rp: QMessageBox.critical(self, "Match Error", "Passwords do not match!"); return
-        if not is_strong_password(p): QMessageBox.critical(self, "Security Error", "Password must be 10+ chars with Mixed Case and Digit."); return
-        
-        if not check_email_verified(e):
-             QMessageBox.critical(self, "Error", "Email not verified yet. Please click verify and check your email."); return
+        u = self.u_in.text().strip()
+        e = self.e_in.text().strip()
+        p = self.p_in.text()
+        rp = self.rp_in.text()
 
-        result = register_user(u, e, p)
-        if result == True: QMessageBox.information(self, "Success", "Account created successfully!"); self.stack.setCurrentIndex(0)
-        elif result == "USERNAME_EXISTS": QMessageBox.warning(self, "Registration Failed", "This username is already taken.")
-        elif result == "EMAIL_EXISTS": QMessageBox.warning(self, "Registration Failed", "This email is already registered.")
+        if not all([u, e, p, rp]):
+            QMessageBox.critical(self, "Validation Error", "All fields are required.")
+            return
+
+        if p != rp:
+            QMessageBox.critical(self, "Match Error", "Passwords do not match!")
+            return
+
+        if not is_strong_password(p):
+            QMessageBox.critical(
+                self,
+                "Security Error",
+                "Password must be 10+ chars with Mixed Case, Digit, and Symbol."
+            )
+            return
+
+        try:
+            res = requests.post(
+                "http://127.0.0.1:5000/register",
+                json={
+                    "username": u,
+                    "email": e,
+                    "password": p
+                },
+                timeout=5
+            )
+
+            data = res.json()
+
+            if res.status_code == 201:
+                QMessageBox.information(self, "Success", "Account created successfully!")
+                self.stack.setCurrentIndex(0)
+
+            elif data["message"] == "USERNAME_EXISTS":
+                QMessageBox.warning(self, "Registration Failed", "This username is already taken.")
+
+            elif data["message"] == "EMAIL_EXISTS":
+                QMessageBox.warning(self, "Registration Failed", "This email is already registered.")
+
+            else:
+                QMessageBox.critical(self, "Registration Failed", data.get("message", "Unknown error"))
+
+        except Exception as ex:
+            QMessageBox.critical(self, "Error", f"Server error: {ex}")
 
 # --- LANGUAGE PAGE ---
 # class LanguagePage(QWidget):
@@ -878,7 +982,6 @@ class RegisterPage(QWidget):
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        create_db()
         self.setFixedSize(1000, 750)
         self.setStyleSheet("background-color: #5D5E62;")
         
@@ -908,9 +1011,8 @@ class MainWindow(QWidget):
             if hasattr(page, 'update_translations'):
                 page.update_translations(lang_code)
 
-def run_server():
-    log = logging.getLogger('werkzeug'); log.setLevel(logging.ERROR); flask_app.run(port=5000, use_reloader=False)
-
 if __name__ == "__main__":
-    threading.Thread(target=run_server, daemon=True).start()
-    app = QApplication(sys.argv); window = MainWindow(); window.show(); sys.exit(app.exec())
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())

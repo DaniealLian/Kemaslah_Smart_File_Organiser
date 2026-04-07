@@ -4,9 +4,6 @@ from email.mime.multipart import MIMEMultipart
 from .config import SENDER_EMAIL, APP_PASSWORD
 
 # --- CONFIGURATION ---
-# Your verified FYP credentials
-SENDER_EMAIL = "limzhihao0513@gmail.com"
-APP_PASSWORD = "xugmqgryoxqowiez" # 16-character Google App Password with no spaces
 
 def send_verification_email(receiver_email, token):
     """Sends a professional verification link for new account registration."""
@@ -15,7 +12,8 @@ def send_verification_email(receiver_email, token):
     message["From"] = f"Kemaslah Manager <{SENDER_EMAIL}>"
     message["To"] = receiver_email
 
-    verify_url = f"http://127.0.0.1:5000/verify?token={token}"
+    # ✅ UPDATED LINK (Supabase-based verification)
+    verify_url = f"http://127.0.0.1:5000/verify-email?email={token}"
 
     html = f"""
     <html>
@@ -42,6 +40,7 @@ def send_verification_email(receiver_email, token):
       </body>
     </html>
     """
+
     message.attach(MIMEText(html, "html"))
     return _execute_send(receiver_email, message)
 

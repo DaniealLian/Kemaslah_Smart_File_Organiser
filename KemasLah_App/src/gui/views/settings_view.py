@@ -1,30 +1,33 @@
+import requests
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFrame, QLineEdit, QScrollArea,
                              QCheckBox, QButtonGroup, QStackedWidget, QMessageBox)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread
 from PyQt6.QtGui import QFont, QPainter, QColor, QBrush
-import random
 from auth.authentication_page import translate_text
-from auth.database import (update_user_language, get_all_languages,
-                           update_display_name, store_otp, verify_otp,
-                           update_password)
-from auth.mailer import send_otp_email
 
 
 # ── OTP Worker Thread ─────────────────────────────────────────────────────────
 class OtpEmailWorker(QThread):
     finished = pyqtSignal(bool, str)
 
-    def __init__(self, email, otp):
+    def __init__(self, email):
         super().__init__()
         self.email = email
-        self.otp = otp
 
     def run(self):
         try:
-            store_otp(self.email, self.otp)
-            send_otp_email(self.email, self.otp)
-            self.finished.emit(True, "OTP sent! Please check your inbox.")
+            res = requests.post(
+                "http://127.0.0.1:5000/request-otp",
+                json={"email": self.email},
+                timeout=5
+            )
+            data = res.json()
+
+            if res.status_code == 200:
+                self.finished.emit(True, data.get("message", "OTP sent! Please check your inbox."))
+            else:
+                self.finished.emit(False, data.get("message", "Failed to send OTP."))
         except Exception as e:
             self.finished.emit(False, str(e))
 
@@ -86,7 +89,7 @@ class LabeledInput(QWidget):
 # ── User Profile Panel ────────────────────────────────────────────────────────
 class UserProfilePanel(QWidget):
     """
-    Username: editable, saved to DB via update_display_name() on confirm.
+    Username: editable, saved to DB via API on confirm.
     Email:    always read-only — cannot be changed.
     Password: lives in its own ChangePasswordPanel (OTP flow).
     """
@@ -131,7 +134,53 @@ class UserProfilePanel(QWidget):
         self.action_btn.setStyleSheet(self._btn_style("#2D3748", "#3D4A5C", border="1px solid #4A5568"))
         self.action_btn.clicked.connect(self._toggle_edit)
         self.main_layout.addWidget(self.action_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        
+        # Account Deletion Action
+        self.delete_btn = QPushButton("🗑 Delete Account")
+        self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.delete_btn.setStyleSheet(self._btn_style("#742A2A", "#9B2C2C"))
+        self.delete_btn.clicked.connect(self._handle_delete_account)
+        self.main_layout.addWidget(self.delete_btn, alignment=Qt.AlignmentFlag.AlignLeft)
         self.main_layout.addStretch()
+    
+    def _handle_delete_account(self):
+        email = self.user_data.get("email", "").strip()
+
+        if not email:
+            QMessageBox.warning(self, "Error", "No user email found.")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Delete Account",
+            "Are you sure you want to permanently delete your account?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            res = requests.post(
+                "http://127.0.0.1:5000/profile/delete",
+                json={"email": email},
+                timeout=5
+            )
+            data = res.json()
+
+            if res.status_code == 200:
+                QMessageBox.information(self, "Success", "Account deleted successfully.")
+
+                main_window = self.window()
+                if hasattr(main_window, "on_logout"):
+                    main_window.on_logout()
+                elif hasattr(main_window, "logout_requested"):
+                    main_window.logout_requested.emit()
+            else:
+                QMessageBox.critical(self, "Error", data.get("message", "Failed to delete account."))
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Server error: {e}")
 
     def _btn_style(self, bg, hover_bg, color="white", border="none"):
         return (f"QPushButton {{ background-color: {bg}; color: {color}; border: {border};"
@@ -151,16 +200,40 @@ class UserProfilePanel(QWidget):
                 QMessageBox.warning(self, "Validation Error", "Username cannot be empty.")
                 return
 
-            email = self.user_data.get('email', '')
-            if update_display_name(email, new_name):
-                self.user_data['display_name'] = new_name
-                self.avatar.initials = "".join(p[0].upper() for p in new_name.split()[:2]) or "OP"
-                self.avatar.update()
-                QMessageBox.information(self, "Success", "Username updated successfully!")
-            else:
-                QMessageBox.critical(self, "Error", "Failed to save. Please try again.")
+            email = self.user_data.get("email", "").strip()
+
+            if not email:
+                QMessageBox.warning(self, "Error", "No user email found.")
+                return
+
+            try:
+                res = requests.post(
+                    "http://127.0.0.1:5000/profile/update",
+                    json={
+                        "email": email,
+                        "display_name": new_name,
+                        "language_code": self.user_data.get("language_code", "en")
+                    },
+                    timeout=5
+                )
+                data = res.json()
+
+                if res.status_code == 200:
+                    self.user_data["display_name"] = new_name
+                    self.avatar.initials = "".join(p[0].upper() for p in new_name.split()[:2]) or "OP"
+                    self.avatar.update()
+                    QMessageBox.information(self, "Success", "Username updated successfully!")
+                else:
+                    QMessageBox.critical(self, "Error", data.get("message", "Failed to save. Please try again."))
+                    self.username_field.setText(
+                        self.user_data.get("display_name") or self.user_data.get("username", "Guest")
+                    )
+
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Server error: {e}")
                 self.username_field.setText(
-                    self.user_data.get('display_name') or self.user_data.get('username', ''))
+                    self.user_data.get("display_name") or self.user_data.get("username", "Guest")
+                )
 
             self.edit_mode = False
             self.username_field.input.setReadOnly(True)
@@ -182,6 +255,7 @@ class ChangePasswordPanel(QWidget):
         self.user_data = user_data or {}
         self.user_email = self.user_data.get('email', '')
         self.countdown = 60
+        self.verified_otp = ""
         self._build_ui()
 
     def _build_ui(self):
@@ -270,8 +344,7 @@ class ChangePasswordPanel(QWidget):
             return
         self.req_btn.setText("Sending...")
         self.req_btn.setEnabled(False)
-        otp = str(random.randint(100000, 999999))
-        self.worker = OtpEmailWorker(self.user_email, otp)
+        self.worker = OtpEmailWorker(self.user_email)
         self.worker.finished.connect(self._on_otp_sent)
         self.worker.start()
 
@@ -300,12 +373,23 @@ class ChangePasswordPanel(QWidget):
         if not otp:
             QMessageBox.warning(self, "Validation Error", "Please enter the OTP code.")
             return
-        if verify_otp(self.user_email, otp):
-            self.otp_section.setVisible(False)
-            self.pw_section.setVisible(True)
-            self.req_btn.setVisible(False)
-        else:
-            QMessageBox.critical(self, "Error", "Invalid or expired OTP. Please try again.")
+        try:
+            res = requests.post(
+                "http://127.0.0.1:5000/verify-otp",
+                json={"email": self.user_email, "otp": otp},
+                timeout=5
+            )
+            data = res.json()
+
+            if res.status_code == 200:
+                self.verified_otp = otp
+                self.otp_section.setVisible(False)
+                self.pw_section.setVisible(True)
+                self.req_btn.setVisible(False)
+            else:
+                QMessageBox.critical(self, "Error", data.get("message", "Invalid or expired OTP. Please try again."))
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Server error: {e}")
 
     def _handle_save_password(self):
         import re
@@ -326,9 +410,25 @@ class ChangePasswordPanel(QWidget):
                 "• A number\n"
                 "• A special character (@$!%*?&)")
             return
-        update_password(self.user_email, new_pw)
-        QMessageBox.information(self, "Success", "Password changed successfully!")
-        self._reset_panel()
+        try:
+            res = requests.post(
+                "http://127.0.0.1:5000/reset-password",
+                json={
+                    "email": self.user_email,
+                    "otp": self.verified_otp,
+                    "new_password": new_pw
+                },
+                timeout=5
+            )
+            data = res.json()
+
+            if res.status_code == 200:
+                QMessageBox.information(self, "Success", "Password changed successfully!")
+                self._reset_panel()
+            else:
+                QMessageBox.critical(self, "Error", data.get("message", "Failed to change password."))
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Server error: {e}")
 
     def _reset_panel(self):
         self.otp_field.setText("")
@@ -344,12 +444,11 @@ class ChangePasswordPanel(QWidget):
 
 # Language Panel 
 class LanguagePanel(QWidget):
-    def __init__(self, user_data): # 1. CHANGED: Accept full user_data instead of just email
+    def __init__(self, user_data):
         super().__init__()
         self.user_data = user_data
         self.user_email = user_data.get('email', 'guest@local')
         
-        # 2. NEW: Find the current language (default to 'en' for English)
         current_lang_code = user_data.get('language_code', 'en')
 
         layout = QVBoxLayout(self)
@@ -364,10 +463,16 @@ class LanguagePanel(QWidget):
         self.btn_group = QButtonGroup(self)
         self.btn_group.setExclusive(True)
 
-        for lang_id, lang_name, lang_code in get_all_languages():
+        languages = [
+            (1, "English", "en"),
+            (2, "Bahasa Melayu", "ms"),
+            (3, "Chinese (Simplified)", "zh-CN"),
+            (4, "Tamil", "ta")
+        ]
+
+        for lang_id, lang_name, lang_code in languages:
             cb = QCheckBox(lang_name)
             
-            # 3. NEW: If this checkbox matches the current language, check it!
             if lang_code == current_lang_code:
                 cb.setChecked(True)
                 
@@ -383,15 +488,27 @@ class LanguagePanel(QWidget):
         layout.addStretch()
 
     def _change_language(self, lang_id, lang_code):
-        if update_user_language(self.user_email, lang_id):
-            
-            # 4. NEW: Update the local dictionary so it remembers if you close and reopen settings!
-            self.user_data['language_code'] = lang_code 
-            
-            main_window = self.window()
-            if hasattr(main_window, 'update_all_pages'):
-                main_window.update_all_pages(lang_code)
+        try:
+            res = requests.post(
+                "http://127.0.0.1:5000/profile/update",
+                json={
+                    "email": self.user_email,
+                    "display_name": self.user_data.get("display_name") or self.user_data.get("username", ""),
+                    "language_code": lang_code
+                },
+                timeout=5
+            )
+            data = res.json()
 
+            if res.status_code == 200:
+                self.user_data['language_code'] = lang_code
+                main_window = self.window()
+                if hasattr(main_window, 'update_all_pages'):
+                    main_window.update_all_pages(lang_code)
+            else:
+                QMessageBox.critical(self, "Error", data.get("message", "Failed to update language."))
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Server error: {e}")
 
 # ── What's New Panel ──────────────────────────────────────────────────────────
 class WhatsNewPanel(QWidget):
@@ -553,3 +670,12 @@ class SettingsView(QWidget):
         idx = self._panel_index.get(label)
         if idx is not None:
             self._stack.setCurrentIndex(idx)
+
+    def update_translations(self, lang_code):
+        """Update language for all text in the Settings view."""
+        try:
+            from auth.authentication_page import translate_text
+            for lbl, btn in self._sidebar_buttons.items():
+                btn.setText(translate_text(lbl, lang_code))
+        except Exception:
+            pass

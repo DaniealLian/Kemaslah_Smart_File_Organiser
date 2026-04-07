@@ -7,18 +7,19 @@ from auth.authentication_page import translate_text
 class TopBar(QWidget):
     path_changed = pyqtSignal(str)
     search_query_changed = pyqtSignal(str)
+    refresh_clicked = pyqtSignal()  # Added from File 1
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current_path = ""
-        self.current_lang = "en" # NEW: Track current language
+        self.current_lang = "en" # Track current language
         self.init_ui()
         
     def init_ui(self):
         # Main horizontal layout for the TopBar
         layout = QHBoxLayout()
         layout.setContentsMargins(20, 15, 20, 15)
-        layout.setSpacing(0)  # Remove extra spacing between the three main zones
+        layout.setSpacing(0) # Remove extra spacing between the three main zones
         
         # LEFT ZONE: Breadcrumbs
         self.breadcrumb_layout = QHBoxLayout()
@@ -29,8 +30,34 @@ class TopBar(QWidget):
         layout.addLayout(self.breadcrumb_layout)
         
         # MIDDLE ZONE: The Spacer
-        layout.addStretch(1) 
-        
+        layout.addStretch(1)
+
+        # REFRESH BUTTON: Added from File 1
+        self.refresh_btn = QPushButton("⟳")
+        self.refresh_btn.setFixedSize(36, 36)
+        self.refresh_btn.setToolTip("Refresh current view")
+        self.refresh_btn.clicked.connect(self.refresh_clicked.emit)
+        self.refresh_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2D3748;
+                color: #A0AEC0;
+                border: 1px solid #4A5568;
+                border-radius: 6px;
+                font-size: 18px;
+                font-weight: bold;
+                padding-bottom: 2px;
+            }
+            QPushButton:hover {
+                background-color: #3D4A5C;
+                color: #4A9EFF;
+                border-color: #4A9EFF;
+            }
+            QPushButton:pressed {
+                background-color: #1A2233;
+            }
+        """)
+        layout.addWidget(self.refresh_btn)
+
         # RIGHT ZONE: Search Bar
         search_widget = QWidget()
         search_layout = QHBoxLayout(search_widget)
