@@ -7,6 +7,19 @@ from PyQt6.QtGui import QFont, QPainter, QColor, QBrush
 from auth.authentication_page import translate_text
 
 
+def parse_json_response(res):
+    print("Status:", res.status_code)
+    print("Response:", res.text)
+
+    if not res.text or not res.text.strip():
+        return None, "Server returned empty response."
+
+    try:
+        return res.json(), None
+    except Exception:
+        return None, f"Server returned invalid response:\n{res.text}"
+
+
 # ── OTP Worker Thread ─────────────────────────────────────────────────────────
 class OtpEmailWorker(QThread):
     finished = pyqtSignal(bool, str)
@@ -20,14 +33,19 @@ class OtpEmailWorker(QThread):
             res = requests.post(
                 "http://127.0.0.1:5000/request-otp",
                 json={"email": self.email},
-                timeout=5
+                timeout=20
             )
-            data = res.json()
+
+            data, error = parse_json_response(res)
+            if error:
+                self.finished.emit(False, error)
+                return
 
             if res.status_code == 200:
                 self.finished.emit(True, data.get("message", "OTP sent! Please check your inbox."))
             else:
                 self.finished.emit(False, data.get("message", "Failed to send OTP."))
+
         except Exception as e:
             self.finished.emit(False, str(e))
 
@@ -134,7 +152,7 @@ class UserProfilePanel(QWidget):
         self.action_btn.setStyleSheet(self._btn_style("#2D3748", "#3D4A5C", border="1px solid #4A5568"))
         self.action_btn.clicked.connect(self._toggle_edit)
         self.main_layout.addWidget(self.action_btn, alignment=Qt.AlignmentFlag.AlignLeft)
-        
+
         # Account Deletion Action
         self.delete_btn = QPushButton("🗑 Delete Account")
         self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -142,7 +160,7 @@ class UserProfilePanel(QWidget):
         self.delete_btn.clicked.connect(self._handle_delete_account)
         self.main_layout.addWidget(self.delete_btn, alignment=Qt.AlignmentFlag.AlignLeft)
         self.main_layout.addStretch()
-    
+
     def _handle_delete_account(self):
         email = self.user_data.get("email", "").strip()
 
@@ -166,7 +184,11 @@ class UserProfilePanel(QWidget):
                 json={"email": email},
                 timeout=5
             )
-            data = res.json()
+
+            data, error = parse_json_response(res)
+            if error:
+                QMessageBox.critical(self, "Error", error)
+                return
 
             if res.status_code == 200:
                 QMessageBox.information(self, "Success", "Account deleted successfully.")
@@ -216,10 +238,22 @@ class UserProfilePanel(QWidget):
                     },
                     timeout=5
                 )
-                data = res.json()
+
+                data, error = parse_json_response(res)
+                if error:
+                    QMessageBox.critical(self, "Error", error)
+                    self.username_field.setText(
+                        self.user_data.get("display_name") or self.user_data.get("username", "Guest")
+                    )
+                    self.edit_mode = False
+                    self.username_field.input.setReadOnly(True)
+                    self.action_btn.setText("✏  Edit Username")
+                    self.action_btn.setStyleSheet(self._btn_style("#2D3748", "#3D4A5C", border="1px solid #4A5568"))
+                    return
 
                 if res.status_code == 200:
                     self.user_data["display_name"] = new_name
+                    self.user_data["username"] = new_name
                     self.avatar.initials = "".join(p[0].upper() for p in new_name.split()[:2]) or "OP"
                     self.avatar.update()
                     QMessageBox.information(self, "Success", "Username updated successfully!")
@@ -379,7 +413,11 @@ class ChangePasswordPanel(QWidget):
                 json={"email": self.user_email, "otp": otp},
                 timeout=5
             )
-            data = res.json()
+
+            data, error = parse_json_response(res)
+            if error:
+                QMessageBox.critical(self, "Error", error)
+                return
 
             if res.status_code == 200:
                 self.verified_otp = otp
@@ -420,7 +458,11 @@ class ChangePasswordPanel(QWidget):
                 },
                 timeout=5
             )
-            data = res.json()
+
+            data, error = parse_json_response(res)
+            if error:
+                QMessageBox.critical(self, "Error", error)
+                return
 
             if res.status_code == 200:
                 QMessageBox.information(self, "Success", "Password changed successfully!")
@@ -442,13 +484,13 @@ class ChangePasswordPanel(QWidget):
         self.resend_timer.stop()
 
 
-# Language Panel 
+# Language Panel
 class LanguagePanel(QWidget):
     def __init__(self, user_data):
         super().__init__()
         self.user_data = user_data
         self.user_email = user_data.get('email', 'guest@local')
-        
+
         current_lang_code = user_data.get('language_code', 'en')
 
         layout = QVBoxLayout(self)
@@ -472,10 +514,10 @@ class LanguagePanel(QWidget):
 
         for lang_id, lang_name, lang_code in languages:
             cb = QCheckBox(lang_name)
-            
+
             if lang_code == current_lang_code:
                 cb.setChecked(True)
-                
+
             cb.setStyleSheet("""
                 QCheckBox { color: white; font-size: 13px; padding: 10px 0px; border-bottom: 1px solid #2D3748; }
                 QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #4A5568; border-radius: 3px; }
@@ -489,26 +531,41 @@ class LanguagePanel(QWidget):
 
     def _change_language(self, lang_id, lang_code):
         try:
+            display_name = (
+                self.user_data.get("display_name")
+                or self.user_data.get("username")
+                or self.user_email.split("@")[0]
+            )
+
             res = requests.post(
                 "http://127.0.0.1:5000/profile/update",
                 json={
                     "email": self.user_email,
-                    "display_name": self.user_data.get("display_name") or self.user_data.get("username", ""),
+                    "display_name": display_name,
                     "language_code": lang_code
                 },
                 timeout=5
             )
-            data = res.json()
+
+            data, error = parse_json_response(res)
+            if error:
+                QMessageBox.critical(self, "Error", error)
+                return
 
             if res.status_code == 200:
-                self.user_data['language_code'] = lang_code
+                self.user_data["language_code"] = lang_code
+                self.user_data["display_name"] = display_name
+                if not self.user_data.get("username"):
+                    self.user_data["username"] = display_name
+
                 main_window = self.window()
-                if hasattr(main_window, 'update_all_pages'):
+                if hasattr(main_window, "update_all_pages"):
                     main_window.update_all_pages(lang_code)
             else:
                 QMessageBox.critical(self, "Error", data.get("message", "Failed to update language."))
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Server error: {e}")
+
 
 # ── What's New Panel ──────────────────────────────────────────────────────────
 class WhatsNewPanel(QWidget):
@@ -631,7 +688,6 @@ class SettingsView(QWidget):
         close_row.addWidget(close_btn)
         right_layout.addLayout(close_row)
 
-        user_email = self.user_data.get('email', 'guest@local')
         self._panels = {
             "User Profile":    UserProfilePanel(self.user_data),
             "Change Password": ChangePasswordPanel(self.user_data),
