@@ -3,25 +3,26 @@ import time
 import datetime
 import shutil
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QCheckBox, 
-                             QPushButton, QDialog, QLabel, QDateEdit, 
-                             QProgressDialog, QMessageBox, QTreeWidget, 
-                             QTreeWidgetItem, QHeaderView, QSizePolicy)
+                             QPushButton, QDialog, QLabel, QDateEdit, QComboBox,
+                             QMessageBox, QTreeWidget, QTreeWidgetItem, 
+                             QHeaderView, QSizePolicy, QApplication)
 from PyQt6.QtCore import Qt, QDate, QThread, pyqtSignal, QDir
 from ..widgets.file_table import FileTableWidget
+from ..widgets.loading_overlay import LoadingOverlay # NEW: Import the Loading Overlay
 
 
 # ─── 1. DATE SELECTION DIALOG ──────────────────────────────────────────────
 class DateSelectionDialog(QDialog):
-    """Custom dialog matching your mockup to select start and end dates."""
+    """Custom dialog to select start and end dates using Month/Year dropdowns."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Select Archiving Date")
-        self.setFixedSize(500, 280)
+        self.setFixedSize(540, 280) 
         self.setStyleSheet("background-color: #1A202C; color: white; border-radius: 8px;")
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(40, 40, 40, 40)
-        layout.setSpacing(30)
+        layout.setContentsMargins(40, 30, 40, 30)
+        layout.setSpacing(25)
 
         title_lbl = QLabel("Please enter the range of file age acceptable\nfor file archiving")
         title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -31,30 +32,88 @@ class DateSelectionDialog(QDialog):
         dates_layout = QHBoxLayout()
         dates_layout.setSpacing(15)
 
-        self.start_date = QDateEdit()
-        self.start_date.setDisplayFormat("MM/yyyy")
-        self.start_date.setDate(QDate.currentDate().addYears(-1))
-        self.start_date.setCalendarPopup(True)
-        self.start_date.setStyleSheet("""
-            QDateEdit { border: 1px solid #3182CE; border-radius: 4px; padding: 8px; background-color: #2D3748; color: #A0AEC0; font-size: 14px; }
-        """)
+        # --- Dropdown Styling ---
+        combo_style_start = """
+            QComboBox { 
+                border: 1px solid #3182CE; border-radius: 4px; padding: 8px; 
+                background-color: #2D3748; color: #A0AEC0; font-size: 14px; min-width: 60px; 
+            }
+            QComboBox::drop-down { border: none; width: 20px; }
+            QComboBox QAbstractItemView { 
+                background-color: #2D3748; color: #A0AEC0; 
+                selection-background-color: #3182CE; selection-color: white;
+            }
+        """
+        combo_style_end = combo_style_start.replace("#3182CE", "#4A5568")
 
+        curr_date = QDate.currentDate()
+        curr_year = curr_date.year()
+        months = [f"{m:02d}" for m in range(1, 13)]
+        years = [str(y) for y in range(curr_year - 15, curr_year + 2)]
+
+        # --- Helper function to create labeled layout ---
+        def create_labeled_combo(label_text, combo_widget):
+            vbox = QVBoxLayout()
+            vbox.setSpacing(6)
+            lbl = QLabel(label_text)
+            lbl.setStyleSheet("color: #A0AEC0; font-size: 12px; font-weight: bold;")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignLeft) 
+            vbox.addWidget(lbl)
+            vbox.addWidget(combo_widget)
+            return vbox
+
+        # --- Start Date (Month / Year) ---
+        start_layout = QHBoxLayout()
+        start_layout.setSpacing(8)
+        
+        self.start_month = QComboBox()
+        self.start_month.addItems(months)
+        self.start_month.setCurrentText(curr_date.addYears(-1).toString("MM"))
+        self.start_month.setStyleSheet(combo_style_start)
+        
+        self.start_year = QComboBox()
+        self.start_year.addItems(years)
+        self.start_year.setCurrentText(str(curr_year - 1))
+        self.start_year.setStyleSheet(combo_style_start)
+        
+        start_layout.addLayout(create_labeled_combo("Month", self.start_month))
+        start_layout.addLayout(create_labeled_combo("Year", self.start_year))
+
+        # --- Separator aligned to bottom ---
+        sep_vbox = QVBoxLayout()
+        sep_vbox.setSpacing(6)
+        spacer = QLabel("") 
+        spacer.setStyleSheet("font-size: 12px;")
         sep_lbl = QLabel("–")
-        sep_lbl.setStyleSheet("font-size: 16px; color: #A0AEC0;")
+        sep_lbl.setStyleSheet("font-size: 16px; color: #A0AEC0; font-weight: bold;")
+        sep_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sep_vbox.addWidget(spacer)
+        sep_vbox.addWidget(sep_lbl)
 
-        self.end_date = QDateEdit()
-        self.end_date.setDisplayFormat("MM/yyyy")
-        self.end_date.setDate(QDate.currentDate())
-        self.end_date.setCalendarPopup(True)
-        self.end_date.setStyleSheet("""
-            QDateEdit { border: 1px solid #4A5568; border-radius: 4px; padding: 8px; background-color: #2D3748; color: #A0AEC0; font-size: 14px; }
-        """)
+        # --- End Date (Month / Year) ---
+        end_layout = QHBoxLayout()
+        end_layout.setSpacing(8)
+        
+        self.end_month = QComboBox()
+        self.end_month.addItems(months)
+        self.end_month.setCurrentText(curr_date.toString("MM"))
+        self.end_month.setStyleSheet(combo_style_end)
+        
+        self.end_year = QComboBox()
+        self.end_year.addItems(years)
+        self.end_year.setCurrentText(str(curr_year))
+        self.end_year.setStyleSheet(combo_style_end)
+        
+        end_layout.addLayout(create_labeled_combo("Month", self.end_month))
+        end_layout.addLayout(create_labeled_combo("Year", self.end_year))
 
-        dates_layout.addWidget(self.start_date)
-        dates_layout.addWidget(sep_lbl)
-        dates_layout.addWidget(self.end_date)
+        # Add to main dates layout
+        dates_layout.addLayout(start_layout)
+        dates_layout.addLayout(sep_vbox)
+        dates_layout.addLayout(end_layout)
         layout.addLayout(dates_layout)
 
+        # --- Action Buttons ---
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(20)
 
@@ -81,12 +140,26 @@ class DateSelectionDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def get_date_range(self):
-        start_dt = datetime.datetime.combine(self.start_date.date().toPyDate(), datetime.datetime.min.time())
-        end_dt = datetime.datetime.combine(self.end_date.date().toPyDate(), datetime.datetime.max.time())
+        s_month = int(self.start_month.currentText())
+        s_year = int(self.start_year.currentText())
+        e_month = int(self.end_month.currentText())
+        e_year = int(self.end_year.currentText())
+
+        start_dt = datetime.datetime(s_year, s_month, 1)
+
+        if e_month == 12:
+            next_m_yr = e_year + 1
+            next_m = 1
+        else:
+            next_m_yr = e_year
+            next_m = e_month + 1
+            
+        end_dt = datetime.datetime(next_m_yr, next_m, 1) - datetime.timedelta(seconds=1)
+
         return start_dt.timestamp(), end_dt.timestamp()
 
 
-# ─── 2. REVIEW & ACCEPT DIALOG (Matches Mockup) ────────────────────────────
+# ─── 2. REVIEW & ACCEPT DIALOG ─────────────────────────────────────────────
 class ArchiveReviewDialog(QDialog):
     """Shows the scanned top-level folders and files with checkboxes"""
     def __init__(self, paths, start_ts, end_ts, parent=None):
@@ -145,7 +218,6 @@ class ArchiveReviewDialog(QDialog):
         """)
         self.tree.setIndentation(20)
         
-        # Group by root location (e.g. "Documents", "Downloads")
         groups = {}
         for path in paths:
             parent_dir = os.path.basename(os.path.dirname(path))
@@ -153,12 +225,10 @@ class ArchiveReviewDialog(QDialog):
             groups[parent_dir].append(path)
             
         for parent_dir, group_paths in groups.items():
-            # 1. Create the Location Group Header (NO CHECKBOX, JUST LABEL)
             group_item = QTreeWidgetItem(self.tree)
             group_item.setText(0, f"Location: {parent_dir}")
             group_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable) 
             
-            # 2. Create the Archivable Units (Folders or Files)
             for p in group_paths:
                 item = QTreeWidgetItem(group_item)
                 item.setText(0, os.path.basename(p))
@@ -171,12 +241,10 @@ class ArchiveReviewDialog(QDialog):
                     if os.path.isdir(p):
                         item.setText(2, "File Folder")
                         item.setText(3, "-")
-                        # Add AutoTristate so partial child selection works perfectly
                         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate)
                         item.setCheckState(0, Qt.CheckState.Checked)
                         item.setData(0, Qt.ItemDataRole.UserRole, p)
                         
-                        # NEW: Recursively populate the contents of this folder so user can browse!
                         self._populate_tree(item, p)
                     else:
                         ext = os.path.splitext(p)[1] or "File"
@@ -190,7 +258,7 @@ class ArchiveReviewDialog(QDialog):
                 except Exception:
                     pass
                 
-        self.tree.expandToDepth(1) # Expands the Location groups automatically
+        self.tree.expandToDepth(1) 
         
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -229,10 +297,8 @@ class ArchiveReviewDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def _populate_tree(self, parent_item, path):
-        """Recursively builds the internal structure of the Archivable Unit"""
         try:
             for entry in os.scandir(path):
-                # Skip hidden files or the archive repository itself
                 if entry.name.startswith('.') or "Kemaslah_Archive" in entry.name:
                     continue
                     
@@ -249,7 +315,7 @@ class ArchiveReviewDialog(QDialog):
                         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate)
                         item.setCheckState(0, Qt.CheckState.Checked)
                         item.setData(0, Qt.ItemDataRole.UserRole, entry.path)
-                        self._populate_tree(item, entry.path) # Recurse deeper
+                        self._populate_tree(item, entry.path) 
                     else:
                         ext = os.path.splitext(entry.name)[1] or "File"
                         item.setText(2, ext)
@@ -268,7 +334,6 @@ class ArchiveReviewDialog(QDialog):
         selected = []
         for i in range(self.tree.topLevelItemCount()):
             group = self.tree.topLevelItem(i)
-            # Go through the Archivable Units inside the Location
             for j in range(group.childCount()):
                 unit = group.child(j)
                 self._collect_checked_paths(unit, selected)
@@ -277,13 +342,10 @@ class ArchiveReviewDialog(QDialog):
     def _collect_checked_paths(self, item, selected):
         state = item.checkState(0)
         if state == Qt.CheckState.Checked:
-            # 1. Fully checked: Grab this path, and DO NOT recurse deeper.
-            # Because shutil.move handles entire directories naturally!
             path = item.data(0, Qt.ItemDataRole.UserRole)
             if path:
                 selected.append(path)
         elif state == Qt.CheckState.PartiallyChecked:
-            # 2. Partially checked: Recurse into children to grab specifically checked items
             for i in range(item.childCount()):
                 self._collect_checked_paths(item.child(i), selected)
 
@@ -291,12 +353,11 @@ class ArchiveReviewDialog(QDialog):
         target_state = Qt.CheckState.Checked if state == 2 else Qt.CheckState.Unchecked
         for i in range(self.tree.topLevelItemCount()):
             group = self.tree.topLevelItem(i)
-            # Apply check state ONLY to the Archivable Units (it cascades automatically)
             for j in range(group.childCount()):
                 group.child(j).setCheckState(0, target_state)
 
 
-# ─── 3. SAFE BACKGROUND SCANNER (Top-Level Logic) ─────────────────────────
+# ─── 3. SAFE BACKGROUND SCANNER ───────────────────────────────────────────
 class ArchiveScannerWorker(QThread):
     finished = pyqtSignal(list)
 
@@ -314,26 +375,23 @@ class ArchiveScannerWorker(QThread):
         ]
 
     def run(self):
-        matched_units = set() # Using a set to prevent duplicates
+        matched_units = set() 
         try:
             for safe_folder in self.safe_folders:
                 if not os.path.exists(safe_folder): continue
 
-                # ONLY look at the top-level items inside the safe folder
                 for entry in os.scandir(safe_folder):
                     if not self.is_running: break
                     if "Kemaslah_Archive" in entry.name: continue
                     
                     entry_path = entry.path
 
-                    # 1. If it's a loose file, check it directly
                     if entry.is_file():
                         try:
                             if self.start_ts <= entry.stat().st_mtime <= self.end_ts:
                                 matched_units.add(entry_path)
                         except: pass
                     
-                    # 2. If it's a folder, search inside. If ANY file matches, add the WHOLE folder!
                     elif entry.is_dir():
                         folder_matches = False
                         for root, dirs, files in os.walk(entry_path):
@@ -344,7 +402,7 @@ class ArchiveScannerWorker(QThread):
                                     stat_info = os.stat(full_path)
                                     if self.start_ts <= stat_info.st_mtime <= self.end_ts:
                                         folder_matches = True
-                                        break # Found one, stop scanning this folder immediately
+                                        break 
                                 except: pass
                             if folder_matches: break
                             
@@ -372,13 +430,27 @@ class ArchiveView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # Instantiate the reusable LoadingOverlay, attaching it to this view
+        self.loading_overlay = LoadingOverlay(self)
+
         # Instructional Label
-        self.info_lbl = QLabel("  Select files to archive by date range using the '⚙ Smart Archive' button above.")
+        self.info_lbl = QLabel("  Viewing: Kemaslah Archives | Use the '⚙ Smart Archive' button above to archive old files.")
         self.info_lbl.setStyleSheet("color: #A0AEC0; font-size: 14px; padding: 15px;")
         layout.addWidget(self.info_lbl)
         
         self.file_table = FileTableWidget()
         layout.addWidget(self.file_table)
+
+        # Automatically load and display the Kemaslah_Archive folder
+        archive_base = os.path.join(QDir.homePath(), "Documents", "Kemaslah_Archive")
+        os.makedirs(archive_base, exist_ok=True) 
+        self.file_table.load_files(archive_base)
+
+    def resizeEvent(self, event):
+        """Ensure the overlay resizes to cover the view properly."""
+        super().resizeEvent(event)
+        if hasattr(self, 'loading_overlay'):
+            self.loading_overlay.resize(self.size())
 
     def open_date_dialog(self):
         dialog = DateSelectionDialog(self)
@@ -392,20 +464,25 @@ class ArchiveView(QWidget):
         self.file_table.select_all_cb.setChecked(False)
         self.file_table.table.blockSignals(False)
         
-        self.info_lbl.setText("  Scanning folders... Please wait.")
-
+        # Show custom loading overlay for the scanning process
+        self.loading_overlay.show_message("Scanning Folders", "Looking for archivable files based on your date range...", "🔍")
+        
         self.scanner_worker = ArchiveScannerWorker(start_ts, end_ts)
         self.scanner_worker.finished.connect(lambda units: self.on_scan_finished(units, start_ts, end_ts))
         self.scanner_worker.start()
 
     def on_scan_finished(self, matched_units, start_ts, end_ts):
+        self.loading_overlay.hide() # Hide the overlay when done scanning
         self.info_lbl.setText(f"  Found {len(matched_units)} archivable folders/files.")
         
         if not matched_units:
             QMessageBox.information(self, "Scan Complete", "No items found in this date range.")
+            
+            archive_base = os.path.join(QDir.homePath(), "Documents", "Kemaslah_Archive")
+            self.file_table.load_files(archive_base)
+            self.info_lbl.setText("  Viewing: Kemaslah Archives | Use the '⚙ Smart Archive' button above to archive old files.")
             return
             
-        # Launch the Review Dialog
         dialog = ArchiveReviewDialog(matched_units, start_ts, end_ts, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             selected_items = dialog.get_selected_files()
@@ -413,37 +490,64 @@ class ArchiveView(QWidget):
             
     def perform_archiving(self, selected_items):
         if not selected_items:
+            QMessageBox.warning(self, "No Selection", "Please select files or folders to archive.")
             return
             
-        # Define Archive Name scheme: e.g., "Archive_10_12_2025"
-        today_str = datetime.datetime.now().strftime("%d_%m_%Y")
+        today_str = datetime.date.today().strftime("%Y-%m-%d")
         archive_base = os.path.join(QDir.homePath(), "Documents", "Kemaslah_Archive")
-        archive_dir = os.path.join(archive_base, f"Archive_{today_str}")
         
-        os.makedirs(archive_dir, exist_ok=True)
+        temp_archive_dir = os.path.join(archive_base, f"Temp_Archive_{today_str}")
+        os.makedirs(temp_archive_dir, exist_ok=True)
+        
+        final_zip_name = os.path.join(archive_base, f"Archive_{today_str}")
+        
+        counter = 1
+        while os.path.exists(f"{final_zip_name}.zip"):
+            final_zip_name = os.path.join(archive_base, f"Archive_{today_str}_{counter}")
+            counter += 1
         
         moved_count = 0
-        for path in selected_items:
+        
+        # Show custom loading overlay for the gathering/moving process
+        self.loading_overlay.show_message("Preparing Archive", "Gathering files for compression...", "📦")
+        QApplication.processEvents() # Force UI to update immediately
+        
+        for i, path in enumerate(selected_items):
             if os.path.exists(path):
                 try:
                     item_name = os.path.basename(path)
-                    dest_path = os.path.join(archive_dir, item_name)
+                    dest_path = os.path.join(temp_archive_dir, item_name)
                     
-                    # Prevent overwrite if two folders/files have the exact same name
                     base, ext = os.path.splitext(item_name)
-                    counter = 1
+                    item_counter = 1
                     while os.path.exists(dest_path):
-                        dest_path = os.path.join(archive_dir, f"{base}_copy{counter}{ext}")
-                        counter += 1
+                        dest_path = os.path.join(temp_archive_dir, f"{base}_copy{item_counter}{ext}")
+                        item_counter += 1
                         
-                    shutil.move(path, dest_path) # shutil.move automatically handles entire folders AND loose files!
+                    shutil.move(path, dest_path) 
                     moved_count += 1
                 except Exception as e:
                     print(f"Failed to move {path}: {e}")
-                    
-        QMessageBox.information(self, "Archiving Complete", 
-                                f"Successfully archived {moved_count} items into:\n{archive_dir}")
+            
+            # Update the overlay message so the user sees progress
+            self.loading_overlay.update_message("Preparing Archive", f"Moved item {i + 1} of {len(selected_items)}...")
+            QApplication.processEvents() 
+            
+        # Update overlay for the final zipping process
+        self.loading_overlay.show_message("Compressing Archive", f"Zipping {moved_count} items into a single file... This may take a minute.", "🗜️")
+        QApplication.processEvents()
         
-        # Display the newly created archive folder directly in the UI
-        self.file_table.load_files(archive_dir)
-        self.info_lbl.setText(f"  Viewing Archive: {archive_dir}")
+        try:
+            shutil.make_archive(final_zip_name, 'zip', temp_archive_dir)
+            shutil.rmtree(temp_archive_dir)
+            
+            self.loading_overlay.hide() # Hide when totally done
+            
+            QMessageBox.information(self, "Archiving Complete", 
+                                    f"Successfully archived and compressed {moved_count} items into:\n{final_zip_name}.zip")
+        except Exception as e:
+            self.loading_overlay.hide()
+            QMessageBox.critical(self, "Compression Error", f"Failed to compress archive: {e}")
+            
+        self.file_table.load_files(archive_base)
+        self.info_lbl.setText(f"  Viewing: Kemaslah Archives")
