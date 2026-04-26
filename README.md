@@ -1,5 +1,6 @@
 User Guide
 **System Document**
+
 1. Hardware Requirements To ensure the Kemaslah application runs smoothly, the following minimum hardware is required:
 Processor (CPU): Intel Core i5 or AMD Ryzen 5 (Multi-core recommended for background threading).
 Memory (RAM): Minimum 8 GB (16 GB recommended for optimal AI model batch processing).
@@ -11,6 +12,7 @@ Program Development Tools (For Source Code): Python 3.10+, Visual Studio Code (o
 Databases (Cloud-Hosted): No local database software installation is required, as the application connects remotely to PostgreSQL (via Supabase) and MongoDB Atlas.
 
 **Installation**
+
 The Kemaslah application is distributed as a pre-compiled, standalone package. To make the installation process as simple as possible for end-users, the application is hosted securely on GitHub. New users do not need to install Python, run any command-line setups, or execute SQL statements, as the databases are cloud-hosted and the application is fully bundled.
 Step-by-Step Installation Guide:
 Open your web browser and navigate to the project's official GitHub repository page.
@@ -20,6 +22,7 @@ Once the download is complete, locate the .zip file in your Downloads folder. Ri
 Ensure your computer is connected to the internet, as the application requires network access to communicate with the Supabase and MongoDB cloud clusters upon launch.
 
 **Operation Document**
+
 This section provides a step-by-step guide on how to run the application and use its major features.
 How to Run the System:
 Navigate to the folder where you extracted the downloaded .zip file.
@@ -75,6 +78,7 @@ MongoDB Atlas: Provides the GridFS cloud storage for the file-sharing feature.
 Google Cloud Console: Provides the OAuth 2.0 API for the "Sign in with Google" feature.
 
 **Authentication Details and Security Configurations**
+
 All sensitive connections and authentication mechanisms are handled securely. In the production environment, these variables are loaded via environment variables (os.getenv), but are documented here for development setup.
 1. Supabase (PostgreSQL) Database Used for storing user credentials (users table) and tracking login states (login_requests table).
 Host: db.urzssrfwuyhkebkwcbdx.supabase.co
