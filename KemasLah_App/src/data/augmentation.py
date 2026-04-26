@@ -1,26 +1,9 @@
-"""
-augmentation.py
----------------
-Image augmentation pipelines for training and validation/inference.
-
-Training augmentations are aggressive to improve model generalisation
-on real-world desktop images (screenshots, WhatsApp exports, etc.).
-Validation/inference transforms are deterministic.
-"""
-
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
 
 def get_train_transforms(image_size: int = 224) -> A.Compose:
-    """
-    Strong augmentation for training.
-    Simulates real-world image conditions:
-      - Random crops & flips for spatial invariance
-      - Colour jitter to handle different lighting conditions
-      - Compression artefacts (JPEG) to handle WhatsApp/messenger images
-      - Random rotation for photos taken at odd angles
-    """
+
     return A.Compose([
         A.RandomResizedCrop(height=image_size, width=image_size, scale=(0.6, 1.0), ratio=(0.75, 1.33), p=1.0),
         A.HorizontalFlip(p=0.5),
@@ -47,10 +30,6 @@ def get_train_transforms(image_size: int = 224) -> A.Compose:
 
 
 def get_val_transforms(image_size: int = 224) -> A.Compose:
-    """
-    Minimal deterministic transforms for validation and testing.
-    Resize + Centre crop + Normalise only.
-    """
     return A.Compose([
         A.Resize(int(image_size * 1.14), int(image_size * 1.14)),
         A.CenterCrop(height=image_size, width=image_size),
@@ -60,10 +39,7 @@ def get_val_transforms(image_size: int = 224) -> A.Compose:
 
 
 def get_inference_transforms(image_size: int = 224) -> A.Compose:
-    """
-    Inference-time transforms. Identical to val but accepts any aspect ratio.
-    Used in the KemasLah file scanner (classifier.py).
-    """
+
     return A.Compose([
         A.LongestMaxSize(max_size=int(image_size * 1.14)),
         A.PadIfNeeded(

@@ -29,23 +29,10 @@ def get_user_scan_roots():
 
 
 def scan_pc_files():
-    TEXT_EXTS = {
-        '.doc', '.docx', '.odt', '.rtf', '.txt', '.pdf', '.md', '.csv',
-        '.xlsx', '.xls', '.pptx', '.ppt', '.json', '.xml', '.yaml',
-        '.yml', '.log', '.ini', '.toml'
-    }
-    IMAGE_VIDEO = {
-        '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.svg', '.ico',
-        '.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm',
-        '.mp3', '.wav', '.flac', '.aac', '.ogg', '.wma'
-    }
-    DEV_CODE = {
-        '.html', '.htm', '.css', '.js', '.ts', '.py', '.java', '.c', '.cpp',
-        '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.sh', '.bat'
-    }
-    ARCHIVE_INST = {
-        '.zip', '.rar', '.7z', '.tar', '.gz', '.exe', '.msi', '.dmg', '.iso', '.dll', '.bin'
-    }
+    TEXT_EXTS = {'.doc', '.docx', '.odt', '.rtf', '.txt', '.pdf', '.md', '.csv','.xlsx', '.xls', '.pptx', '.ppt', '.json', '.xml', '.yaml','.yml', '.log', '.ini', '.toml'}
+    IMAGE_VIDEO = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.svg', '.ico','.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm','.mp3', '.wav', '.flac', '.aac', '.ogg', '.wma'}
+    DEV_CODE = {'.html', '.htm', '.css', '.js', '.ts', '.py', '.java', '.c', '.cpp','.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.sh', '.bat'}
+    ARCHIVE_INST = {'.zip', '.rar', '.7z', '.tar', '.gz', '.exe', '.msi', '.dmg', '.iso', '.dll', '.bin'}
 
     counts = {
         "Text-Based files": 0,
@@ -509,7 +496,15 @@ class StatisticsView(QWidget):
         return ai_container
 
     def load_ai_metrics(self):
-        metrics_path = 'AI/ai_metrics.json'
+        def resource_path(relative_path):
+            import sys
+            try:
+                base_path = sys._MEIPASS
+            except Exception:
+                base_path = os.path.abspath(".")
+            return os.path.join(base_path, relative_path)
+
+        metrics_path = resource_path(os.path.join('AI', 'ai_metrics.json'))
 
         if os.path.exists(metrics_path):
             try:

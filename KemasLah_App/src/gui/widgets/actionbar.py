@@ -7,7 +7,6 @@ class ActionBar(QWidget):
     action_clicked = pyqtSignal(str) 
     smart_organise_clicked = pyqtSignal()
     
-    # --- NEW: Navigation Signals ---
     nav_back_clicked = pyqtSignal()
     nav_forward_clicked = pyqtSignal()
 
@@ -47,7 +46,7 @@ class ActionBar(QWidget):
             QPushButton:disabled { background-color: #1A202C; color: #4A5568; }
         """
 
-        # --- NEW: Navigation Buttons ---
+        # --- Navigation Buttons ---
         self.back_btn = QPushButton("<")
         self.back_btn.setStyleSheet(nav_btn_style)
         self.back_btn.setFixedWidth(40) # Make them square-ish
@@ -71,7 +70,7 @@ class ActionBar(QWidget):
             ("🗑 Delete", "delete")
         ]
 
-        self.action_buttons = {} # NEW: Store buttons to translate them later
+        self.action_buttons = {}
         
         for text, action_name in actions:
             btn = QPushButton(text)
@@ -85,8 +84,8 @@ class ActionBar(QWidget):
         
         # Smart Organise button
         if show_smart_button:
-            self.smart_base_text = button_text # NEW: Store base text
-            self.smart_btn = QPushButton(f"✏ {button_text}") # NEW: Use self.smart_btn
+            self.smart_base_text = button_text 
+            self.smart_btn = QPushButton(f"✏ {button_text}") 
             self.smart_btn.setStyleSheet("""
                 QPushButton {
                     padding: 10px 20px;

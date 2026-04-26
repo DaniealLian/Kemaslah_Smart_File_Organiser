@@ -124,7 +124,8 @@ class DateSelectionDialog(QDialog):
             QPushButton { background-color: white; color: black; border-radius: 4px; font-size: 14px; font-weight: bold; }
             QPushButton:hover { background-color: #E2E8F0; }
         """)
-        self.continue_btn.clicked.connect(self.accept)
+
+        self.continue_btn.clicked.connect(self.handle_continue) # Change this line
 
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -138,6 +139,49 @@ class DateSelectionDialog(QDialog):
         btn_layout.addWidget(self.continue_btn)
         btn_layout.addWidget(self.cancel_btn)
         layout.addLayout(btn_layout)
+
+    def handle_continue(self):
+        """Validates the date range before accepting the dialog."""
+        s_month = int(self.start_month.currentText())
+        s_year = int(self.start_year.currentText())
+        e_month = int(self.end_month.currentText())
+        e_year = int(self.end_year.currentText())
+
+        # Create datetime objects for comparison
+        start_dt = datetime.datetime(s_year, s_month, 1)
+        end_dt = datetime.datetime(e_year, e_month, 1)
+
+        if end_dt < start_dt:
+            QMessageBox.warning(
+                self, 
+                "Invalid Date Range", 
+                f"The end date ({e_month}/{e_year}) cannot be earlier than "
+                f"the start date ({s_month}/{s_year})."
+            )
+            return  # Do not call accept(), keep dialog open
+        
+        self.accept()
+
+    def get_date_range(self):
+        """Returns the timestamps for the validated range."""
+        s_month = int(self.start_month.currentText())
+        s_year = int(self.start_year.currentText())
+        e_month = int(self.end_month.currentText())
+        e_year = int(self.end_year.currentText())
+
+        start_dt = datetime.datetime(s_year, s_month, 1)
+
+        # Logic to get the very last second of the end month
+        if e_month == 12:
+            next_m_yr = e_year + 1
+            next_m = 1
+        else:
+            next_m_yr = e_year
+            next_m = e_month + 1
+            
+        end_dt = datetime.datetime(next_m_yr, next_m, 1) - datetime.timedelta(seconds=1)
+
+        return start_dt.timestamp(), end_dt.timestamp()
 
     def get_date_range(self):
         s_month = int(self.start_month.currentText())

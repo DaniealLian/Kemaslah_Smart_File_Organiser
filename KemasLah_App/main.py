@@ -14,11 +14,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import pyqtSignal, Qt, QTimer, QThread
 
-# Import authentication system
 from auth.authentication_page import MainWindow as AuthWindow
 from auth.server import app as flask_app
 
-# Import your existing GUI components
 from src.gui.widgets.sidebar import Sidebar
 from src.gui.widgets.topbar import TopBar
 from src.gui.widgets.actionbar import ActionBar
@@ -39,10 +37,16 @@ from src.inference.classifier_worker import (
     CNNSearchWorker, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 )
 
-CNN_MODEL_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "models", "trained", "best_model.pth"
-)
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
+CNN_MODEL_PATH = resource_path(os.path.join("models", "trained", "best_model.pth"))
 
 _MEDIA_EXTS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 
@@ -62,7 +66,7 @@ class DeepSearchWorker(QThread):
         self.supported_text_types = {
             'pdf', 'docx', 'txt', 'md', 'csv', 'py', 'json',
             'xlsx', 'xls', 'pptx', 'rtf', 'xml', 'html', 'htm',
-            'yaml', 'yml', 'toml', 'ini', 'log'
+            'yaml', 'yml', 'toml', 'ini', 'log', 'mhtml'
         }
         self.unsupported_types = {
             'zip', 'rar', '7z', 'tar', 'gz',
@@ -334,6 +338,9 @@ class SmartOrganiseWorker(QThread):
         temp_kfs = []
         classify_paths = list(image_paths)
         kf_to_video = {}
+
+        keyframe_dir = os.path.join(os.path.expanduser("~"), ".kemaslah_temp", "keyframes")
+        os.makedirs(keyframe_dir, exist_ok=True)
 
         for vp in video_paths:
             self._ensure_not_cancelled()

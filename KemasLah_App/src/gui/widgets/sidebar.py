@@ -19,7 +19,7 @@ class CircularImage(QLabel):
 class Sidebar(QWidget):
     # Signal to communicate with main window
     navigation_changed = pyqtSignal(str)
-    logout_requested = pyqtSignal()  # ADDED this
+    logout_requested = pyqtSignal()
     
     def __init__(self, parent=None, user_data=None):
         super().__init__(parent)
@@ -166,10 +166,10 @@ class Sidebar(QWidget):
     def set_active(self, identifier):
         """Programmatically highlights a specific sidebar button by its identifier"""
         for btn in self.nav_buttons:
-            # If the button's ID matches the one we want, check it (highlight it)
+           
             if btn.property("identifier") == identifier:
                 btn.setChecked(True)
-            # Otherwise, uncheck it (remove highlight)
+            
             else:
                 btn.setChecked(False)
 

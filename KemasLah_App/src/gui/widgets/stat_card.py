@@ -1,18 +1,18 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
-from auth.authentication_page import translate_text # NEW: Import translation
+from auth.authentication_page import translate_text
 
 class StatCard(QWidget):
     def __init__(self, title, value, total, color="#2563EB"):
         super().__init__()
-        self.base_title = title       # NEW: Store original text
-        self.current_value = value    # NEW: Store values to rebuild string
+        self.base_title = title     
+        self.current_value = value  
         self.init_ui(title, value, total, color)
         
     def init_ui(self, title, value, total, color):
         layout = QVBoxLayout()
         layout.setContentsMargins(20, 15, 20, 15)
         
-        self.title_label = QLabel(title) # CHANGED: Added self.
+        self.title_label = QLabel(title)
         self.title_label.setStyleSheet("color: #C0C0C0; font-size: 16px; font-weight: bold;")
         layout.addWidget(self.title_label)
         
@@ -40,10 +40,10 @@ class StatCard(QWidget):
         
         # Value labels
         value_layout = QHBoxLayout()
-        self.value_label = QLabel(f"{value}GB used") # CHANGED: Added self.
+        self.value_label = QLabel(f"{value}GB used")
         self.value_label.setStyleSheet("color: #E0E0E0; font-size: 12px;")
         
-        self.total_label = QLabel(f"{total}GB") # CHANGED: Added self.
+        self.total_label = QLabel(f"{total}GB")
         self.total_label.setStyleSheet("color: #888888; font-size: 12px;")
         
         value_layout.addWidget(self.value_label)

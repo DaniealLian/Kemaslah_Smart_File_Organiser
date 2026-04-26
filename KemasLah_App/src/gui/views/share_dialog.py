@@ -6,9 +6,9 @@ from datetime import datetime
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                              QLineEdit, QComboBox, QPushButton, QMessageBox, 
                              QDateTimeEdit, QCheckBox)
-from PyQt6.QtCore import Qt, QDateTime
+from PyQt6.QtCore import Qt, QDateTime, QDir
 
-# --- NEW: MONGODB IMPORTS ---
+# --- MONGODB IMPORTS ---
 from pymongo import MongoClient
 import gridfs
 # ----------------------------
@@ -55,7 +55,7 @@ class ShareFileDialog(QDialog):
 
         layout = QVBoxLayout(self)
         
-        # --- NEW: Show file size in the title of the popup ---
+        # --- Show file size in the title of the popup ---
         try:
             size_bytes = os.path.getsize(file_path)
             if size_bytes < 1024 * 1024:
@@ -147,10 +147,8 @@ class ShareFileDialog(QDialog):
                     fs.put(f, filename=cloud_file_name, owner=self.current_user_email)
                     
                 print(f"Successfully uploaded {cloud_file_name} to MongoDB Atlas!")
-                # -------------------------------------------------------------
-                
-                # --- EXISTING LOCAL STORAGE BACKUP (Kept so no features are removed) ---
-                cloud_dir = os.path.join(os.getcwd(), "Cloud_Storage")
+                # ------------------------------------------------------------
+                cloud_dir = os.path.join(QDir.homePath(), "Documents", "Kemaslah_Cloud_Backup")
                 os.makedirs(cloud_dir, exist_ok=True)
                 cloud_path = os.path.join(cloud_dir, cloud_file_name)
                 shutil.copy2(self.file_path, cloud_path)

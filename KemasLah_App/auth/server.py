@@ -21,9 +21,9 @@ app.secret_key = FLASK_SECRET_KEY
 def get_db_connection():
     try:
         return psycopg2.connect(
-            host="db.urzssrfwuyhkebkwcbdx.supabase.co",
+            host="aws-1-ap-northeast-1.pooler.supabase.com",
             database="postgres",
-            user="postgres",
+            user="postgres.urzssrfwuyhkebkwcbdx",
             password="nc9@nftkbZ8g-#F",
             sslmode="require"
         )

@@ -106,19 +106,16 @@ class TopBar(QWidget):
     def update_breadcrumbs(self, path):
         self.current_path = path
         
-        # 1. Clear old buttons
         while self.breadcrumb_layout.count():
             child = self.breadcrumb_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
 
-        # 2. Handle Special Pages (Home, Settings, etc.)
         if path in ["Home", "Smart Archive", "Settings", "Statistics"] or not os.path.isabs(path):
             translated_path = translate_text(path, getattr(self, 'current_lang', 'en'))
             self.add_crumb_label(translated_path)
             return
 
-        # 3. Handle Real File Paths (e.g., C:/Users/Docs)
         path = os.path.normpath(path)
         parts = path.split(os.sep)
         
@@ -127,16 +124,13 @@ class TopBar(QWidget):
         for i, part in enumerate(parts):
             if not part: continue # skip empty
             
-            # Windows drive fix (e.g., "C:") needs a slash to be valid
             if i == 0 and ':' in part:
                 current_build_path = part + os.sep
             else:
                 current_build_path = os.path.join(current_build_path, part)
             
-            # Add Button
             self.add_crumb_button(part, current_build_path)
             
-            # Add Separator ">" (except for the last item)
             if i < len(parts) - 1:
                 sep = QLabel(">")
                 sep.setStyleSheet("color: #666666; font-weight: bold;")

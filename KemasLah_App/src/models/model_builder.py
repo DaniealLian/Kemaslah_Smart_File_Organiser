@@ -28,15 +28,7 @@ from src.data.category_mapper import NUM_CLASSES
 # Places365 ResNet50 — custom loader (not in timm by default)
 # ─────────────────────────────────────────────────────────────
 def _load_places365_resnet50(num_classes: int, dropout: float) -> nn.Module:
-    """
-    Load ResNet50 pre-trained on Places365.
 
-    The pre-trained weights file must be downloaded manually:
-        URL: http://places2.csail.mit.edu/models_places365/resnet50_places365.pth.tar
-        Save to: models/pretrained/resnet50_places365.pth.tar
-
-    If the weight file is not found, falls back to ImageNet ResNet50 from torchvision.
-    """
     import torchvision.models as tv_models
     import os
 
@@ -50,15 +42,8 @@ def _load_places365_resnet50(num_classes: int, dropout: float) -> nn.Module:
         # Places365 checkpoint stores weights under the key 'state_dict'
         state_dict = checkpoint.get("state_dict", checkpoint)
 
-        # Strip 'module.' prefix added by DataParallel training
         cleaned = {k.replace("module.", ""): v for k, v in state_dict.items()}
 
-        # ── FIX: explicitly remove the fc (classifier) keys before loading ──
-        # The checkpoint fc is shaped [365, 2048] (Places365 classes).
-        # Our model fc is [1000, 2048] (default ImageNet init).
-        # PyTorch 2.1+ raises RuntimeError on size mismatches even with
-        # strict=False — so we strip the fc keys entirely and replace
-        # the head ourselves in the next block below.
         backbone_weights = {
             k: v for k, v in cleaned.items()
             if not k.startswith("fc.")
@@ -79,8 +64,6 @@ def _load_places365_resnet50(num_classes: int, dropout: float) -> nn.Module:
         )
         model = tv_models.resnet50(weights="IMAGENET1K_V2")
 
-    # Replace the final fully-connected layer with our custom 10-class head
-    # in_features is always 2048 for ResNet50 regardless of what fc was before
     in_features = model.fc.in_features
     model.fc = nn.Sequential(
         nn.Dropout(p=dropout),
@@ -113,7 +96,7 @@ def _load_timm_model(model_name: str, num_classes: int, dropout: float) -> nn.Mo
     model = timm.create_model(
         resolved,
         pretrained=True,
-        num_classes=0,         # Remove the original head
+        num_classes=0,         
         drop_rate=dropout,
     )
 

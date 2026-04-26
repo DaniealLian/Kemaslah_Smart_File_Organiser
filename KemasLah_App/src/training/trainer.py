@@ -71,7 +71,7 @@ class Trainer:
         # Loss: label smoothing improves generalisation
         self.criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
-        # Optimiser — AdamW is better than vanilla Adam for fine-tuning
+        # Optimiser
         self.optimizer = optim.AdamW(
             filter(lambda p: p.requires_grad, model.parameters()),
             lr=config["training"]["learning_rate"],
@@ -181,9 +181,6 @@ class Trainer:
                 print(f"\nEpoch {epoch}: Unfreezing backbone for full fine-tuning...")
                 unfreeze_all(self.model)
 
-                # Rebuild optimizer with differential LRs:
-                # backbone gets 10x smaller LR to avoid destroying pretrained features
-                # head gets full LR to continue learning fast
                 self.optimizer = optim.AdamW([
                     {"params": [p for n, p in self.model.named_parameters()
                                 if "fc" not in n and "head" not in n],
@@ -193,10 +190,6 @@ class Trainer:
                      "lr": self.config["training"]["learning_rate"]},
                 ], weight_decay=self.config["training"]["weight_decay"])
 
-                # ── CRITICAL FIX: rebuild the scheduler with the new optimizer ──
-                # Without this the old scheduler tracked the old optimizer object,
-                # so the new optimizer's LR never decayed — causing the flat LR
-                # at 1.00e-05 seen in the previous training run.
                 remaining_epochs = epochs - epoch
                 scheduler_type   = self.config["training"]["scheduler"]
                 if scheduler_type == "cosine":

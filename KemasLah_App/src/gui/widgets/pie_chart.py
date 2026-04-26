@@ -3,13 +3,13 @@ from PyQt6.QtCharts import QChart, QChartView, QPieSeries, QPieSlice
 from PyQt6.QtGui import QColor, QPainter, QFont
 from PyQt6.QtCore import QMargins 
 
-from auth.authentication_page import translate_text # NEW: Import translation
+from auth.authentication_page import translate_text 
 
 class PieChartWidget(QWidget):
     def __init__(self, title, data):
         super().__init__()
         self.base_title = title
-        self.legend_labels = [] # NEW: Store legend labels for translation
+        self.legend_labels = [] 
         self.setMinimumHeight(500)
         self.init_ui(title, data)
         
@@ -17,7 +17,7 @@ class PieChartWidget(QWidget):
         layout = QVBoxLayout()
         layout.setContentsMargins(20, 15, 20, 15)
         
-        self.title_label = QLabel(title) # CHANGED: Added self.
+        self.title_label = QLabel(title) 
         self.title_label.setStyleSheet("color: #E0E0E0; font-size: 14px; font-weight: bold;")
         layout.addWidget(self.title_label)
         
@@ -81,7 +81,6 @@ class PieChartWidget(QWidget):
         layout.addLayout(legend_layout)
         self.setLayout(layout)
 
-    # --- NEW: Translation Method ---
     def update_translations(self, lang_code):
         self.title_label.setText(translate_text(self.base_title, lang_code))
         

@@ -1,32 +1,3 @@
-"""
-dataset_loader.py  (Kaggle-compatible version)
-----------------------------------------------
-Supports TWO download sources for each dataset:
-
-  Source A — Kaggle (recommended for you):
-      kagglehub downloads to a cache folder automatically.
-      Run 00_kaggle_download.ipynb — it saves the paths to config for you.
-
-  Source B — Official manual download (fallback):
-      ~24 GB for Places365, ~19 GB for COCO.
-
-Kaggle vs Official — what is actually different:
-  ┌────────────────┬──────────────────────────────────────────────────┐
-  │ Dataset        │ Difference                                       │
-  ├────────────────┼──────────────────────────────────────────────────┤
-  │ COCO 2017      │ IDENTICAL data. Kaggle wraps it inside a         │
-  │                │ coco2017/ subfolder. Auto-detected here.         │
-  ├────────────────┼──────────────────────────────────────────────────┤
-  │ Places365      │ Kaggle is a SUBSET (~36,500 images, 100 per      │
-  │                │ category). Images are in category folders with   │
-  │                │ NO split text files. Loader auto-splits 80/10/10.│
-  └────────────────┴──────────────────────────────────────────────────┘
-
-The Kaggle Places365 subset is fine for KemasLah because you are
-fine-tuning on top of Places365-pretrained ResNet50 weights, so
-the model already understands scenes from its pretraining.
-"""
-
 import os
 import json
 import random
@@ -48,11 +19,6 @@ VALID_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 # ─────────────────────────────────────────────────────────────
 
 def _resolve_coco_root(kaggle_path: str) -> str | None:
-    """
-    Kaggle COCO (awsaf49/coco-2017-dataset) puts files inside a
-    coco2017/ subfolder. Find the folder that actually contains
-    train2017/ and annotations/.
-    """
     base = Path(kaggle_path)
     candidates = [base, base / "coco2017"] + list(base.iterdir())
     for p in candidates:
@@ -62,10 +28,6 @@ def _resolve_coco_root(kaggle_path: str) -> str | None:
 
 
 def _resolve_places365_kaggle_root(kaggle_path: str) -> str | None:
-    """
-    Kaggle Places365 (benjaminkz/places365) puts images in category
-    sub-folders. Find the folder that contains those category folders.
-    """
     known_cats = {"abbey", "airport_terminal", "bedroom", "office", "beach", "forest"}
 
     def _is_places365_root(folder: Path) -> bool:
@@ -87,10 +49,6 @@ def _resolve_places365_kaggle_root(kaggle_path: str) -> str | None:
 # 1. COCO 2017 Dataset
 # ─────────────────────────────────────────────────────────────
 class COCODataset(Dataset):
-    """
-    Works for both Kaggle and official COCO downloads.
-    Labels each image by its dominant (largest-area) object.
-    """
 
     def __init__(self, root: str, split: str = "train", transform=None):
         self.root      = Path(root)
@@ -191,20 +149,6 @@ class Places365OfficialDataset(Dataset):
 # 2B. Places365 — Kaggle download (category folders, no split files)
 # ─────────────────────────────────────────────────────────────
 class Places365KaggleDataset(Dataset):
-    """
-    Kaggle Places365 (benjaminkz/places365) — ~36,500 images in category folders.
-
-    Structure inside the Kaggle download:
-        <root>/
-            abbey/          ← scene name = folder name
-                00000001.jpg
-            airport_terminal/
-            bedroom/
-            ...
-
-    No split files exist, so this class creates an 80/10/10
-    train/val/test split with a fixed random seed for reproducibility.
-    """
 
     def __init__(
         self,
@@ -276,11 +220,6 @@ class Places365KaggleDataset(Dataset):
 # 3. Custom / WhatsApp images (optional)
 # ─────────────────────────────────────────────────────────────
 class CustomDataset(Dataset):
-    """
-    Your own labelled images for fine-tuning.
-    Place images in datasets/custom/train/<CategoryName>/ etc.
-    This is optional — training works without it.
-    """
 
     def __init__(self, root: str, split: str = "train", transform=None):
         self.root      = Path(root) / split
@@ -323,16 +262,7 @@ def _subsample_datasets(
     max_total: int,
     seed: int,
 ) -> list[Dataset]:
-    """
-    Reduce a list of datasets so their combined length is at most max_total,
-    preserving the original proportion of each dataset.
 
-    Example: COCO (117K) + Places365 (1.35M) → 500K total
-        COCO keeps    :  117K × (500K / 1.47M) ≈  40K  (8%)
-        Places365 keeps: 1.35M × (500K / 1.47M) ≈ 460K (92%)
-
-    Uses torch.utils.data.Subset so no data is copied — only indices change.
-    """
     from torch.utils.data import Subset
 
     total = sum(len(ds) for ds in dataset_list)
@@ -359,16 +289,7 @@ def _subsample_datasets(
 # 4. Main entry point
 # ─────────────────────────────────────────────────────────────
 def build_dataloaders(config: dict) -> tuple[DataLoader, DataLoader, DataLoader]:
-    """
-    Build train / val / test DataLoaders.
-    Automatically uses Kaggle paths if set in config, otherwise
-    falls back to the manual download paths.
 
-    If config['training']['max_train_samples'] is set and greater than 0,
-    the training set is randomly subsampled to that size while keeping
-    the proportion of each dataset the same (COCO vs Places365 ratio preserved).
-    Val and test sets are NOT subsampled — they always use all available data.
-    """
     image_size       = config["dataset"]["image_size"]
     batch_size       = config["training"]["batch_size"]
     num_workers      = config["dataset"]["num_workers"]
@@ -485,23 +406,12 @@ def build_dataloaders(config: dict) -> tuple[DataLoader, DataLoader, DataLoader]
     g = torch.Generator().manual_seed(seed)
     kw = dict(num_workers=num_workers, pin_memory=pin_memory, persistent_workers=False)
 
-    # ── Weighted sampler for balanced training ──────────────────
-    # Instead of shuffle=True (which would still over-represent large
-    # classes), we assign each sample a weight = 1/class_count so that
-    # every category is seen equally often per epoch regardless of size.
-    #
-    # This is the standard fix for class imbalance — it does NOT remove
-    # any data. It just changes how frequently each sample is drawn.
-    # Val and test loaders are never weighted — they use all data as-is.
     use_weighted = config.get("training", {}).get("use_weighted_sampler", True)
 
     if use_weighted:
         print("\nBuilding weighted sampler for balanced training...")
         print("(Each category will be seen equally often per epoch)")
 
-        # Collect labels from the training dataset
-        # We access .samples from each sub-dataset directly to avoid
-        # loading all images just to get labels
         all_labels: list[int] = []
 
         def _collect_labels(ds) -> list[int]:

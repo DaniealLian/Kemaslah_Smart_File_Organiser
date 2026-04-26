@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                              QAbstractItemView, QStackedWidget)
 from PyQt6.QtGui import QColor
 from PyQt6.QtCore import Qt, pyqtSignal
-from auth.authentication_page import translate_text # NEW: Import translation
+from auth.authentication_page import translate_text 
 
 # Import your custom widgets
 from ..widgets.stat_card import StatCard

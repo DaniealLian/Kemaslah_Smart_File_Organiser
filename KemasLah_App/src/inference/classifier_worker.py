@@ -1,32 +1,3 @@
-"""
-classifier_worker.py
---------------------
-Place this file at: src/inference/classifier_worker.py
-
-A QThread wrapper that runs CNN image/video classification in the
-background so the PyQt6 UI never freezes during Smart Search.
-
-How it fits into KemasLah:
-    When the user types a search query (e.g. "vacation") and hits Enter,
-    the text SearchWorker in file_table.py handles filenames and document
-    content.  This worker handles image and video files — it classifies
-    every .jpg/.png/.mp4 etc. in the current folder using the trained
-    ResNet50 model, then emits match_found() for every file whose
-    predicted KemasLah category matches the query.
-
-Matching logic — the 10 KemasLah categories are:
-    Vacation_Travel, Work_Professional, Food_Dining, Nature_Outdoors,
-    Home_Interior, People_Events, Pets_Animals, Vehicles_Transport,
-    Sports_Fitness, Screenshots_Documents
-
-Query words are matched against category words with substring logic:
-    "vacation" → Vacation_Travel    ✓
-    "food"     → Food_Dining        ✓
-    "pet"      → Pets_Animals       ✓  (substring of "pets")
-    "outdoor"  → Nature_Outdoors    ✓
-    "vehicle"  → Vehicles_Transport ✓
-"""
-
 import os
 from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -38,10 +9,6 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".wmv"}
 
 
 def _query_matches_category(query: str, category: str) -> bool:
-    """
-    True if any word in `query` overlaps (as substring) with any word
-    in `category` (split on underscore).  Min query word length: 3.
-    """
     q_words = [w.lower() for w in query.split() if len(w) >= 3]
     c_words = [w.lower() for w in category.split("_")]
     for qw in q_words:
@@ -52,17 +19,6 @@ def _query_matches_category(query: str, category: str) -> bool:
 
 
 class CNNSearchWorker(QThread):
-    """
-    Background thread — classifies all images/videos in a folder and
-    emits match_found() for every file that matches the search query.
-
-    Signals
-    -------
-    match_found(name: str, full_path: str, category: str, confidence: float)
-    search_finished(total_scanned: int, total_matched: int)
-    error_occurred(message: str)
-    """
-
     match_found     = pyqtSignal(str, str, str, float)
     search_finished = pyqtSignal(int, int)
     error_occurred  = pyqtSignal(str)
@@ -133,7 +89,6 @@ class CNNSearchWorker(QThread):
             self.search_finished.emit(0, 0)
             return
 
-        # Build classify list — videos become a keyframe, images go directly
         classify_list: list[str] = []
         actual_map:   dict[str, str] = {}
         temp_kfs:     list[str] = []

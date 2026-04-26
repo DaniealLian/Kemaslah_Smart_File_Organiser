@@ -141,9 +141,6 @@ class ImageClassifier:
         for i in range(0, len(valid), batch_size):
             batch_paths = valid[i:i + batch_size]
 
-            # --- FIX: track successful paths alongside their tensors so that
-            # probs[k] always aligns with valid_paths[k], regardless of how
-            # many files are skipped within the batch. ---
             tensors     = []   # one tensor per successfully preprocessed image
             valid_paths = []   # paths that produced a tensor (same order)
             failed_paths = []  # paths that raised IOError
