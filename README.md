@@ -55,8 +55,8 @@ Month/Year Dropdowns: Forces the user to select a valid start and end date. The 
 "Select All" Checkbox: Toggles the selection of all found old files.
 Review Tree: Displays files grouped by their location. Users can uncheck specific files they wish to keep.
 "Accept" Button: Commences the ZIP compression process, triggering the floating LoadingOverlay while it packs the files.
-5. Statistics Page
 
+5. Statistics Page
 File Distribution Pie Charts: Hovering over a slice (e.g., "Image & Video files") makes the slice explode outward. The legend categorises the data visually.
 AI Model Performance Table: Displays the Precision, Recall, and F1-Score of the Machine Learning model.
 APPENDIX B: Developer Guide
